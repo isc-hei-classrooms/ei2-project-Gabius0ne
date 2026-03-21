@@ -33,7 +33,7 @@ STATIONS = [
 ]
 
 # Horizons de prévision retenus : 13h à 36h (tous à 2 chiffres, pas de zéro devant)
-HORIZONS = [str(h) for h in range(13, 37)]  # ["13", "14", ..., "36"]
+HORIZONS = [f"{h:02d}" if h < 10 else str(h) for h in range(1, 37)]
 
 # Mesures réelles (pas de tag Prediction)
 REAL_MEASUREMENTS = {
@@ -140,7 +140,7 @@ if __name__ == "__main__":
         merged = merged.join(df, on="timestamp", how="full", coalesce=True)
 
     merged = merged.sort("timestamp")
-    out = OUTPUT / "meteo_multistation_v3.parquet"
+    out = OUTPUT / "meteo_multistation_v4.parquet"
     merged.write_parquet(out)
 
     print(f"\n✓ Sauvegardé : {out}")
