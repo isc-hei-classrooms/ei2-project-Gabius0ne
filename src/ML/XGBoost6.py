@@ -26,10 +26,10 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 # ─────────────────────────────────────────────
 BASE = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA")
 
-X_PATH = BASE / "processed" / "X_features_v5.parquet"
-Y_PATH = BASE / "processed" / "Y_target_v5.parquet"
-B_PATH = BASE / "processed" / "B_baseline_v5.parquet"
-OUT    = BASE / "models_xgb5"
+X_PATH = BASE / "processed" / "X_features_v6.parquet"
+Y_PATH = BASE / "processed" / "Y_target_v6.parquet"
+B_PATH = BASE / "processed" / "B_baseline_v6.parquet"
+OUT    = BASE / "models_xgb6"
 OUT.mkdir(exist_ok=True)
 
 TEST_RATIO = 0.20   # derniers 20% en test

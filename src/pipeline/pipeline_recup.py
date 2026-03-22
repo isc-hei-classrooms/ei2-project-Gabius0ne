@@ -1,5 +1,5 @@
 """
-pipeline_recup_v3.py
+pipeline_recup_v5.py
 Récupération des données MeteoSuisse depuis InfluxDB.
 - Mesures réelles    : toutes variables, 6 stations
 - Prévisions         : toutes variables, 6 stations, horizons 13h à 36h
@@ -56,6 +56,9 @@ PRED_MEASUREMENTS = {
     "PRED_DURSUN_ctrl":    "pred_sunshine",
     "PRED_FF_10M_ctrl":    "pred_wind_speed",
     "PRED_DD_10M_ctrl":    "pred_wind_dir",
+    "PRED_GLOB_q10":       "pred_glob_rad_q10",
+    "PRED_GLOB_q90":       "pred_glob_rad_q90",
+    "PRED_GLOB_stde":      "pred_glob_rad_stde",
 }
 
 
