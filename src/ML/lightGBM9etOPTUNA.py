@@ -261,7 +261,8 @@ for t in range(n_steps):
         pickle.dump(model, f)
 
     if t % 12 == 0:
-        print(f"  t={t:03d} ({metrics[-1]['time_label']}) [{group_label}] — RMSE model={rmse_m:.4f} | baseline={rmse_b:.4f if rmse_b else 'N/A'}")
+        base_str = f"{rmse_b:.4f}" if rmse_b is not None else "N/A"
+        print(f"  t={t:03d} ({metrics[-1]['time_label']}) [{group_label}] — RMSE model={rmse_m:.4f} | baseline={base_str}")
 
 
 # ─────────────────────────────────────────────
