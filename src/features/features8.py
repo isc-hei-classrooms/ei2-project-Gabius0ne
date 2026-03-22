@@ -75,7 +75,7 @@ STATIONS = [
 PRED_VARS = ["temp", "glob_rad", "pressure", "relhum", "precip", "sunshine", "wind_speed", "wind_dir"]
 
 # Variables d'incertitude irradiance (nouveau v8)
-# Uniquement pour J+1, pas pour J (PV J a une importance de 0.6 = bruit)
+# Uniquement pour J+1, pas pour J 
 PRED_VARS_UNCERTAINTY = ["glob_rad_q10", "glob_rad_q90", "glob_rad_stde"]
 
 # Variables avec encodage cyclique sin/cos (au lieu de valeur brute)
@@ -463,15 +463,15 @@ def build_features(
         if col in oiken_j_morning.columns:
             features[f"{col}_j_morning_total"] = float(oiken_j_morning[col].sum())
 
-    # ── Météo réelle J-1 complet (Zurich)
+    # ── Météo réelle J-1 complet 
     meteo_jm1 = get_day_slice(meteo_zurich, day_jm1)
     features.update(real_meteo_stats(meteo_jm1, real_cols, "rmet_jm1"))
 
-    # ── Météo réelle J matin jusqu'à 10h (Zurich)
+    # ── Météo réelle J matin jusqu'à 10h 
     meteo_j_morning = get_morning_slice(meteo_zurich, day_j, until_hour=10)
     features.update(real_meteo_stats(meteo_j_morning, real_cols, "rmet_jmorn"))
 
-    # ── Prévisions météo J+1 (horizons corrigés h15–h36)
+    # ── Prévisions météo J+1 (h15–h36)
     # NOUVEAU v8: inclut glob_rad_q10, q90, stde (incertitude irradiance)
     features.update(extract_pred_vector(
         meteo_utc, target_date,
@@ -481,14 +481,13 @@ def build_features(
     ))
 
     # ── Prévisions météo J (horizons courts h1–h14 — inertie thermique)
-    # v8: SANS extra_vars PV — importance groupée PV J = 0.6 (bruit pur)
     features.update(extract_pred_vector(
         meteo_utc, day_j,
         horizon_func=get_correct_horizon_j,
         prefix="predJ",
     ))
 
-    # ── Features PV agrégées J+1 uniquement (PV J supprimé en v8)
+    # ── Features PV agrégées J+1 uniquement 
     # Condense le signal PV en quelques features fortes
     prefix_pv = "pred"
 
@@ -654,11 +653,11 @@ def main():
     print(f"\n  Wind dir encodage:")
     print(f"    sin: {len(wd_sin)}, cos: {len(wd_cos)}, brut: {len(wd_raw)}")
     if wd_raw:
-        print(f"    ⚠️  Colonnes wind_dir brutes restantes: {wd_raw[:5]}...")
+        print(f"      Colonnes wind_dir brutes restantes: {wd_raw[:5]}...")
     else:
-        print(f"    ✓ Aucune colonne wind_dir brute")
+        print(f"     Aucune colonne wind_dir brute")
 
-    print(f"\n✓ Sauvegardé dans : {OUT}")
+    print(f"\n Sauvegardé dans : {OUT}")
 
 
 if __name__ == "__main__":
