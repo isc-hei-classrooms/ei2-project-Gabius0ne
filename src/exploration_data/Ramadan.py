@@ -1,6 +1,12 @@
+"""
+ramadan_analysis.py
+Compare le profil de charge nocturne pendant le Ramadan 2025
+vs mars 2024 (référence) pour voir si Oiken rate l'effet Ramadan.
+"""
+
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
@@ -11,29 +17,40 @@ BASE = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA")
 RAMADAN_START = date(2025, 3, 1)
 RAMADAN_END   = date(2025, 3, 30)
 
-df = pd.read_csv(BASE / "oiken-data.csv",
-    parse_dates=["timestamp"], dayfirst=True, na_values=["#N/A"])
-df = df.rename(columns={
-    "standardised load [-]":         "load",
-    "standardised forecast load [-]": "forecast"
-}).set_index("timestamp").sort_index()
+# ── CHARGEMENT ──
+df = (
+    pd.read_csv(BASE / "oiken-data.csv",
+        parse_dates=["timestamp"], dayfirst=True, na_values=["#N/A"])
+    .rename(columns={
+        "standardised load [-]":          "load",
+        "standardised forecast load [-]": "forecast",
+    })
+    .set_index("timestamp")
+    .sort_index()
+)
 
+# ── DÉCOUPAGE PÉRIODES ──
 ramadan_2025   = df.loc[str(RAMADAN_START):str(RAMADAN_END)]
 reference_2024 = df.loc["2024-03-01":"2024-03-30"]
 
+# masque nocturne : 21h-23h + 0h-5h (heures ou le ramadan impacte la conso)
 night_mask_r = (ramadan_2025.index.hour >= 21)   | (ramadan_2025.index.hour <= 5)
 night_mask_f = (reference_2024.index.hour >= 21) | (reference_2024.index.hour <= 5)
 
+# ── PROFILS MOYENS PAR HEURE NOCTURNE ──
 ramadan_night  = ramadan_2025[night_mask_r].groupby(ramadan_2025[night_mask_r].index.hour)["load"].mean()
 ref_night      = reference_2024[night_mask_f].groupby(reference_2024[night_mask_f].index.hour)["load"].mean()
 forecast_night = ramadan_2025[night_mask_r].groupby(ramadan_2025[night_mask_r].index.hour)["forecast"].mean()
 
+# ── ERREUR DE PRÉVISION PAR HEURE ──
+# erreur = load reel - forecast, positif = oiken sous-estime
 error_ramadan = (ramadan_2025[night_mask_r]["load"] - ramadan_2025[night_mask_r]["forecast"]).dropna()
 error_ref     = (reference_2024[night_mask_f]["load"] - reference_2024[night_mask_f]["forecast"]).dropna()
 
 error_by_hour_ramadan = error_ramadan.groupby(error_ramadan.index.hour).mean()
 error_by_hour_ref     = error_ref.groupby(error_ref.index.hour).mean()
 
+# ── FIGURES ──
 fig, axes = plt.subplots(2, 1, figsize=(14, 10))
 fig.patch.set_facecolor("#1a1a2e")
 for ax in axes:
@@ -41,6 +58,7 @@ for ax in axes:
     ax.tick_params(colors="#e0e0e0")
     ax.spines[:].set_color("#444")
 
+# subplot 1 : profils nocturnes comparés
 ax1 = axes[0]
 ax1.plot(ramadan_night.index,  ramadan_night.values,  color="#ff6b6b", lw=2, label="Load réel Ramadan 2025")
 ax1.plot(ref_night.index,      ref_night.values,      color="#00b4d8", lw=2, label="Load réel Mars 2024 (référence)")
@@ -51,6 +69,7 @@ ax1.set_ylabel("Load normalisé [-]", color="#e0e0e0")
 ax1.legend(facecolor="#1a1a2e", labelcolor="white")
 ax1.set_xticks([0, 1, 2, 3, 4, 5, 21, 22, 23])
 
+# subplot 2 : erreur de prevision par heure, ramadan vs reference
 ax2 = axes[1]
 ax2.bar(np.array(list(error_by_hour_ramadan.index)) - 0.2,
         error_by_hour_ramadan.values, width=0.4,
@@ -68,4 +87,3 @@ ax2.set_xticks([0, 1, 2, 3, 4, 5, 21, 22, 23])
 plt.tight_layout(pad=2.0)
 plt.savefig(BASE / "processed" / "ramadan_analysis.png", dpi=150,
     bbox_inches="tight", facecolor="#1a1a2e")
-print("✓ Sauvegardé")

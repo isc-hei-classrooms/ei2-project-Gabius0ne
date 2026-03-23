@@ -12,9 +12,12 @@ DATASET = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA\processed\da
 PV_COLS = ["solar_central_valais", "solar_sion", "solar_sierre", "solar_remote"]
 
 df = pl.read_parquet(DATASET).select(["forecast_error"] + PV_COLS).drop_nulls()
+#drop les lignes avec un null
 
 corrs = {col: df.select(pl.corr("forecast_error", col)).item() for col in PV_COLS}
+#pour chaque pair calcul le coef de pearson retourne un dict
 corrs = dict(sorted(corrs.items(), key=lambda x: abs(x[1]), reverse=True))
+#trie du plus petit au plus élevé
 
 plt.figure(figsize=(7, 4))
 plt.barh(list(corrs.keys()), list(corrs.values()), color="steelblue")

@@ -7,12 +7,13 @@ client = InfluxDBClient(
 )
 query_api = client.query_api()
 
-query = '''
+result = query_api.query('''
 import "influxdata/influxdb/schema"
-schema.fieldKeys(bucket: "MeteoSuisse")
-'''
-result = query_api.query(query)
+schema.measurements(bucket: "MeteoSuisse")
+''')
+
 for table in result:
     for r in table.records:
-        print(r.values)
+        print(r.get_value())
+
 client.close()

@@ -2,9 +2,9 @@
 pipeline_recup_v5.py
 Récupération des données MeteoSuisse depuis InfluxDB.
 - Mesures réelles    : toutes variables, 6 stations
-- Prévisions         : toutes variables, 6 stations, horizons 13h à 36h
+- Prévisions         : toutes variables, 6 stations, horizons 0h à 36h
 - Colonnes nommées   : {variable}_{station} et pred_{variable}_h{horizon}_{station}
-Résultat : meteo_multistation_v3.parquet
+Résultat : meteo_multistation_v5.parquet
 """
 
 import polars as pl

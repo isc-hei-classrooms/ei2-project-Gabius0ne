@@ -25,4 +25,3 @@ for ax, year in zip(axes, years):
 fig.suptitle("Jours fériés et vacances scolaires (is_holiday)", fontsize=13)
 plt.tight_layout()
 plt.savefig(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\check_holidays.png", dpi=150)
-print("Sauvegardé : check_holidays.png")
