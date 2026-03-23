@@ -3,19 +3,19 @@ train_lgbm_v9_split_day_night.py
 ================================
 Entraînement LightGBM avec hyperparamètres séparés jour/nuit.
 
-Constat v8 : le modèle sous-estime systématiquement les creux PV en journée.
+Constat v10 : le modèle sous-estime systématiquement les creux PV en journée.
 Les hyperparamètres optimisés globalement par Optuna sont un compromis
 qui favorise la nuit (60% des pas, signal simple) au détriment du jour
 (40% des pas, signal PV complexe).
 
 Solution v9 : deux tunings Optuna indépendants.
-  - Groupe NUIT (21h00–05h45 UTC) : 36 modèles, pas 0–23 + 84–95
-  - Groupe JOUR (06h00–20h45 UTC) : 60 modèles, pas 24–83
+  - Groupe NUIT (15h00–09h UTC) : 36 modèles, pas 0–23 + 84–95
+  - Groupe JOUR (09h00–14h45 UTC) : 60 modèles, pas 24–83
   
 Chaque groupe développe ses propres hyperparamètres optimaux.
 Les prédictions sont fusionnées pour l'évaluation globale.
 
-Features : v8 (identiques, pas de changement)
+Features : v9 (identiques, pas de changement)
 Split : 60% train / 20% val (Optuna) / 20% test
 
 Sorties :
@@ -41,10 +41,10 @@ from optuna.samplers import TPESampler
 # ─────────────────────────────────────────────
 BASE = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA")
 
-X_PATH = BASE / "processed" / "X_features_v8.parquet"
-Y_PATH = BASE / "processed" / "Y_target_v8.parquet"
-B_PATH = BASE / "processed" / "B_baseline_v8.parquet"
-OUT    = BASE / "models9"
+X_PATH = BASE / "processed" / "X_features_v9.parquet"
+Y_PATH = BASE / "processed" / "Y_target_v9.parquet"
+B_PATH = BASE / "processed" / "B_baseline_v9.parquet"
+OUT    = BASE / "models9.4"
 OUT.mkdir(exist_ok=True)
 
 TRAIN_RATIO = 0.60
@@ -56,16 +56,12 @@ EARLY_STOPPING   = 50
 RANDOM_SEED      = 42
 
 # Groupes de pas de temps (indices 0–95 = 00h00–23h45 UTC)
-# NUIT : 00h00–05h45 (pas 0–23) + 21h00–23h45 (pas 84–95) = 36 pas
-# JOUR : 06h00–20h45 (pas 24–83) = 60 pas
-NIGHT_STEPS = list(range(0, 24)) + list(range(84, 96))   # 36 pas
-DAY_STEPS   = list(range(24, 84))                         # 60 pas
+NIGHT_STEPS = list(range(0, 44)) + list(range(64, 96))  # 00h-10h45 + 16h-23h45
+DAY_STEPS   = list(range(44, 64))                        # 11h-15h45
+OPTUNA_STEPS_NIGHT = [0, 12, 28, 72, 84, 92]              # ajout 28 (07h) et 72 (18h)
+OPTUNA_STEPS_DAY   = [36, 44, 48, 52, 56]
 
-# Pas représentatifs pour Optuna (accélération)
-# Nuit : minuit, 3h, 22h, 23h
-OPTUNA_STEPS_NIGHT = [0, 12, 84, 92]
-# Jour : 7h, 10h, 12h, 15h, 18h (couvre rampe matin, pic PV, après-midi, soirée)
-OPTUNA_STEPS_DAY   = [28, 40, 48, 60, 72]
+
 
 
 # ─────────────────────────────────────────────
@@ -89,8 +85,8 @@ n_steps   = Y_arr.shape[1]
 print(f"  Samples : {n_samples} jours")
 print(f"  Features : {X_arr.shape[1]}")
 print(f"  Pas de temps : {n_steps}")
-print(f"  Groupe NUIT : {len(NIGHT_STEPS)} pas (00h–05h45 + 21h–23h45)")
-print(f"  Groupe JOUR : {len(DAY_STEPS)} pas (06h–20h45)")
+print(f"  Groupe NUIT : {len(NIGHT_STEPS)} pas (15hà9h)")
+print(f"  Groupe JOUR : {len(DAY_STEPS)} pas (09h-15h)")
 
 # ─────────────────────────────────────────────
 # 2. SPLIT TRAIN / VAL / TEST
