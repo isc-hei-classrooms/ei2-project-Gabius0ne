@@ -1,31 +1,5 @@
 """
 pipeline_features_v10.py
-=======================
-Changements par rapport à v6 :
-
-1. PROFIL HORAIRE PV J-1
-   Ajout du profil heure par heure de la production solaire de J-1
-   pour les 4 sources (central_valais, sion, sierre, remote).
-   24 valeurs par source = 96 features supplémentaires.
-   Permet au modèle de voir la FORME de la courbe PV de la veille
-   (cloche propre = ciel dégagé, irrégulier = nuageux).
-   Les régimes météo persistent souvent 2-3 jours → informatif pour J+1.
-   ANTI-LEAKAGE : J-1 complet, disponible à 2h du matin le jour J.
-
-2. FEATURES PV AGRÉGÉES J+1 ET J
-   Condensation du signal PV en features fortes :
-     - pred_pv_total   : somme production PV prédite sur 24h (1 feature)
-     - pred_pv_day     : somme PV prédit heures diurnes 06h-20h UTC (1 feature)
-     - pred_glob_rad_mean_day : irradiance moyenne diurne toutes stations (1 feature)
-     - pred_glob_rad_std_stations_t{h} : écart-type inter-stations par heure (24 features)
-   Le modèle voit directement "beaucoup/peu de PV demain" en une feature,
-   au lieu de devoir assembler 144 features diluées.
-
-Hérite de v6 :
-  - Correction leakage prévisions météo (h15–h36 pour J+1)
-  - Prévisions jour J avec horizons courts (h1–h14)
-  - Encodage sin/cos wind_dir
-  - Suppression solar_remote_j_morning_total
 
 Sorties :
   DATA/processed/X_features_v10.parquet
