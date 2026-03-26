@@ -12,11 +12,9 @@ import polars as pl
 from pathlib import Path
 from influxdb_client import InfluxDBClient
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION — paramètres de connexion InfluxDB et périmètre de requête
 # ═══════════════════════════════════════════════════════════════════════════════
-
 
 URL    = "https://timeseries.hevs.ch"
 TOKEN  = "ixOI8jiwG1nn6a2MaE1pGa8XCiIJ2rqEX6ZCnluhwAyeZcrT6FHoDgnQhNy5k0YmVrk7hZGPpvb_5aaA-ZxhIw=="
@@ -40,7 +38,7 @@ STATIONS = [
 
 
 HORIZONS = [f"{h:02d}" if h < 10 else str(h) for h in range(1, 37)]
-
+#tient compte du souci en desous de 2 chiffres : 01 03 04 ...
 
 REAL_MEASUREMENTS = {
     "Air temperature 2m above ground (current value)":        "temp_2m",
@@ -85,9 +83,9 @@ def fetch_real(api, measurement, alias, station):
       |> range(start: {START}, stop: {STOP})
       |> filter(fn: (r) => r._measurement == "{measurement}")
       |> filter(fn: (r) => r.Site == "{station}")
-      |> keep(columns: ["_time", "_value"])
+      |> keep(columns: ["_time", "_value"]) 
     '''
-
+    #filtre les mesures
     # Exécution de la requête et extraction des enregistrements
     result = api.query(query)
     #récupère des tables en retour

@@ -687,7 +687,7 @@ def main():
     print(f"\n  Wind dir encodage:")
     print(f"    sin: {len(wd_sin)}, cos: {len(wd_cos)}, brut: {len(wd_raw)}")
     if wd_raw:
-        print(f"    ⚠️  Colonnes wind_dir brutes restantes: {wd_raw[:5]}...")
+        print(f"      Colonnes wind_dir brutes restantes: {wd_raw[:5]}...")
     else:
         print(f"    ✓ Aucune colonne wind_dir brute")
 
