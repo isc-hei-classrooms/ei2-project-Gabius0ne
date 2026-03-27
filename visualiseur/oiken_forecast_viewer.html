@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oiken Load Forecast Viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg-deep: #060a10;
+    --bg-panel: #0c1220;
+    --bg-card: #111a2e;
+    --bg-hover: #182440;
+    --border: #1c2d4a;
+    --border-active: #3b82f6;
+    --text: #c8d6e5;
+    --text-dim: #5a6f8a;
+    --text-bright: #eaf0f8;
+    --accent-ml: #38bdf8;
+    --accent-base: #fb923c;
+    --accent-real: #e2e8f0;
+    --accent-good: #34d399;
+    --accent-bad: #f87171;
+    --glow-ml: rgba(56, 189, 248, 0.15);
+    --glow-base: rgba(251, 146, 60, 0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-deep);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── UPLOAD SCREEN ── */
+  #uploadScreen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    position: relative;
+  }
+
+  #uploadScreen::before {
+    content: '';
+    position: absolute;
+    top: -200px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(56,189,248,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .upload-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
+  }
+
+  .upload-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    margin-bottom: 40px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .drop-zones {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    max-width: 780px;
+    width: 100%;
+    margin-bottom: 32px;
+  }
+
+  @media (max-width: 700px) {
+    .drop-zones { grid-template-columns: 1fr; }
+  }
+
+  .drop-zone {
+    background: var(--bg-panel);
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .drop-zone::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+
+  .drop-zone[data-type="pred"]::after { background: var(--glow-ml); }
+  .drop-zone[data-type="base"]::after { background: var(--glow-base); }
+  .drop-zone[data-type="load"]::after { background: rgba(226,232,240,0.05); }
+
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--border-active);
+    transform: translateY(-2px);
+  }
+  .drop-zone:hover::after, .drop-zone.dragover::after { opacity: 1; }
+
+  .drop-zone.loaded {
+    border-style: solid;
+  }
+  .drop-zone[data-type="pred"].loaded { border-color: var(--accent-ml); }
+  .drop-zone[data-type="base"].loaded { border-color: var(--accent-base); }
+  .drop-zone[data-type="load"].loaded { border-color: var(--accent-real); }
+
+  .drop-zone .icon {
+    font-size: 2.2rem;
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .drop-zone .zone-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-bright);
+    margin-bottom: 4px;
+  }
+
+  .drop-zone .zone-hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .drop-zone .zone-status {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 500;
+  }
+
+  .drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .launch-btn {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: white;
+    border: none;
+    padding: 14px 48px;
+    border-radius: 10px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    opacity: 0.3;
+    pointer-events: none;
+    letter-spacing: 0.3px;
+  }
+
+  .launch-btn.ready {
+    opacity: 1;
+    pointer-events: auto;
+    box-shadow: 0 4px 24px rgba(37, 99, 235, 0.35);
+  }
+
+  .launch-btn.ready:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 32px rgba(37, 99, 235, 0.5);
+  }
+
+  .upload-note {
+    margin-top: 20px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    text-align: center;
+    max-width: 500px;
+    line-height: 1.5;
+  }
+
+  /* ── CHART SCREEN ── */
+  #chartScreen {
+    display: none;
+    padding: 20px 24px;
+  }
+
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .top-bar h1 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: -0.3px;
+  }
+
+  .top-bar .reset-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .top-bar .reset-btn:hover {
+    color: var(--text);
+    border-color: var(--accent-bad);
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .nav-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 7px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .nav-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border-active);
+  }
+
+  input[type="date"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    padding: 7px 12px;
+    border-radius: 7px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="date"]:focus { border-color: var(--border-active); }
+
+  .date-info {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin-bottom: 14px;
+  }
+
+  .chart-wrap {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    max-width: 1100px;
+    margin: 0 auto 16px;
+  }
+
+  .legend-row {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 10px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-line { width: 18px; height: 2px; border-radius: 1px; }
+  .legend-line.dashed { background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 8px); height: 2px; }
+
+  .metrics {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  .metric {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 20px;
+    text-align: center;
+    min-width: 135px;
+  }
+
+  .metric .m-label {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 3px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .metric .m-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  /* ── LOADING OVERLAY ── */
+  #loadingOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(6,10,16,0.85);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 14px;
+  }
+  #loadingOverlay.show { display: flex; }
+
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent-ml);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .load-text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+
+  /* ── ERROR ── */
+  .error-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: #7f1d1d;
+    border: 1px solid #991b1b;
+    color: #fca5a5;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    z-index: 200;
+    transition: transform 0.3s;
+    max-width: 90%;
+  }
+  .error-toast.visible { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ═══ UPLOAD SCREEN ═══ -->
+<div id="uploadScreen">
+  <div class="upload-title">Oiken Forecast Viewer</div>
+  <div class="upload-subtitle">Glisse tes fichiers .parquet pour visualiser</div>
+
+  <div class="drop-zones">
+    <div class="drop-zone" data-type="load" id="zoneLoad">
+      <input type="file" accept=".parquet" data-type="load">
+      <span class="icon">📊</span>
+      <div class="zone-label">LOAD RÉEL</div>
+      <div class="zone-hint">Y_target · load_tXXX</div>
+      <div class="zone-status" id="statusLoad"></div>
+    </div>
+    <div class="drop-zone" data-type="pred" id="zonePred">
+      <input type="file" accept=".parquet" data-type="pred">
+      <span class="icon">🤖</span>
+      <div class="zone-label">PRÉDICTION ML</div>
+      <div class="zone-hint">predictions · pred_tXXX</div>
+      <div class="zone-status" id="statusPred"></div>
+    </div>
+    <div class="drop-zone" data-type="base" id="zoneBase">
+      <input type="file" accept=".parquet" data-type="base">
+      <span class="icon">📐</span>
+      <div class="zone-label">BASELINE</div>
+      <div class="zone-hint">B_baseline · baseline_tXXX</div>
+      <div class="zone-status" id="statusBase"></div>
+    </div>
+  </div>
+
+  <button class="launch-btn" id="launchBtn">Visualiser</button>
+
+  <div class="upload-note">
+    Auto-détection du type par préfixe des colonnes (load_t, pred_t, baseline_t).<br>
+    Tout est traité localement dans ton navigateur — rien n'est envoyé.
+  </div>
+</div>
+
+<!-- ═══ CHART SCREEN ═══ -->
+<div id="chartScreen">
+  <div class="top-bar">
+    <h1>Oiken Load Forecast — ML vs Baseline</h1>
+    <button class="reset-btn" id="resetBtn">← Charger d'autres fichiers</button>
+  </div>
+
+  <div class="controls">
+    <button class="nav-btn" id="prevBtn">◀ Précédent</button>
+    <input type="date" id="datePicker">
+    <button class="nav-btn" id="nextBtn">Suivant ▶</button>
+  </div>
+
+  <div class="date-info" id="dateInfo"></div>
+
+  <div class="chart-wrap">
+    <div class="legend-row">
+      <div class="legend-item"><div class="legend-line" style="background:var(--accent-real)"></div> Load réel</div>
+      <div class="legend-item"><div class="legend-line dashed" style="color:var(--accent-ml)"></div> Prédiction ML</div>
+      <div class="legend-item"><div class="legend-line dashed" style="color:var(--accent-base)"></div> Baseline</div>
+    </div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="metrics">
+    <div class="metric">
+      <div class="m-label">MAE ML</div>
+      <div class="m-value" style="color:var(--accent-ml)" id="maeML">—</div>
+    </div>
+    <div class="metric">
+      <div class="m-label">MAE Baseline</div>
+      <div class="m-value" style="color:var(--accent-base)" id="maeBase">—</div>
+    </div>
+    <div class="metric">
+      <div class="m-label">Amélioration</div>
+      <div class="m-value" id="improvement">—</div>
+    </div>
+    <div class="metric">
+      <div class="m-label">RMSE ML</div>
+      <div class="m-value" style="color:var(--accent-ml)" id="rmseML">—</div>
+    </div>
+    <div class="metric">
+      <div class="m-label">RMSE Baseline</div>
+      <div class="m-value" style="color:var(--accent-base)" id="rmseBase">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LOADING ═══ -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="load-text" id="loadText">Lecture des fichiers parquet…</div>
+</div>
+
+<!-- ═══ ERROR TOAST ═══ -->
+<div class="error-toast" id="errorToast"></div>
+
+<script type="module">
+import initParquet, { readParquet } from 'https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// ── State ──
+const state = {
+  files: { load: null, pred: null, base: null },
+  data: { load: {}, pred: {}, base: {} },
+  dates: [],
+  chart: null
+};
+
+// ── DOM refs ──
+const $ = id => document.getElementById(id);
+
+// ── Error handling ──
+function showError(msg) {
+  const t = $('errorToast');
+  t.textContent = msg;
+  t.classList.add('visible');
+  setTimeout(() => t.classList.remove('visible'), 4000);
+}
+
+// ── Detect file type from columns ──
+function detectType(columns) {
+  const cols = columns.filter(c => c !== 'date');
+  if (cols.some(c => c.startsWith('pred_t'))) return 'pred';
+  if (cols.some(c => c.startsWith('baseline_t'))) return 'base';
+  if (cols.some(c => c.startsWith('load_t'))) return 'load';
+  return null;
+}
+
+// ── Parse parquet to {date: [96 values]} ──
+function parseParquetData(table) {
+  const schema = table.schema;
+  const fields = schema.fields;
+  const colNames = [];
+  for (let i = 0; i < fields.length; i++) {
+    colNames.push(fields.get(i).name);
+  }
+
+  const type = detectType(colNames);
+  if (!type) throw new Error('Colonnes non reconnues: ' + colNames.slice(0, 5).join(', '));
+
+  const prefixMap = { pred: 'pred_t', base: 'baseline_t', load: 'load_t' };
+  const prefix = prefixMap[type];
+
+  // Build column index mapping
+  const valueCols = [];
+  for (let i = 0; i < 96; i++) {
+    const name = prefix + String(i).padStart(3, '0');
+    const idx = colNames.indexOf(name);
+    if (idx === -1) throw new Error(`Colonne manquante: ${name}`);
+    valueCols.push(idx);
+  }
+  const dateIdx = colNames.indexOf('date');
+  if (dateIdx === -1) throw new Error('Colonne "date" manquante');
+
+  // Read data
+  const result = {};
+  const nRows = table.numRows;
+
+  for (let row = 0; row < nRows; row++) {
+    let dateVal = table.getChildAt(dateIdx).get(row);
+    // Handle different date representations
+    if (dateVal instanceof Date) {
+      dateVal = dateVal.toISOString().split('T')[0];
+    } else {
+      dateVal = String(dateVal);
+    }
+    // Ensure YYYY-MM-DD format
+    if (dateVal.length > 10) dateVal = dateVal.substring(0, 10);
+
+    const values = [];
+    for (let i = 0; i < 96; i++) {
+      const v = table.getChildAt(valueCols[i]).get(row);
+      values.push(v == null || Number.isNaN(v) ? null : Math.round(v * 10000) / 10000);
+    }
+    result[dateVal] = values;
+  }
+
+  return { type, data: result, rows: nRows };
+}
+
+// ── Process a file ──
+async function processFile(file, explicitType) {
+  const buf = await file.arrayBuffer();
+  const uint8 = new Uint8Array(buf);
+
+  const table = readParquet(uint8).intoIPCStream();
+
+  // Use Apache Arrow to read the IPC stream
+  const arrow = await import('https://cdn.jsdelivr.net/npm/apache-arrow@17.0.0/+esm');
+  const arrowTable = arrow.tableFromIPC(table);
+
+  // Get columns
+  const colNames = arrowTable.schema.fields.map(f => f.name);
+  let type = explicitType || detectType(colNames);
+  if (!type) throw new Error('Type non détecté. Colonnes: ' + colNames.slice(0, 5).join(', '));
+
+  const prefixMap = { pred: 'pred_t', base: 'baseline_t', load: 'load_t' };
+  const prefix = prefixMap[type];
+
+  const dateCol = arrowTable.getChild('date');
+  if (!dateCol) throw new Error('Colonne "date" manquante');
+
+  const result = {};
+  const nRows = arrowTable.numRows;
+
+  for (let row = 0; row < nRows; row++) {
+    let dateVal = dateCol.get(row);
+    if (dateVal instanceof Date) {
+      dateVal = dateVal.toISOString().split('T')[0];
+    } else {
+      dateVal = String(dateVal);
+    }
+    if (dateVal.length > 10) dateVal = dateVal.substring(0, 10);
+
+    const values = [];
+    for (let i = 0; i < 96; i++) {
+      const col = arrowTable.getChild(prefix + String(i).padStart(3, '0'));
+      if (!col) { values.push(null); continue; }
+      const v = col.get(row);
+      values.push(v == null || Number.isNaN(v) ? null : Math.round(v * 10000) / 10000);
+    }
+    result[dateVal] = values;
+  }
+
+  return { type, data: result, rows: nRows };
+}
+
+// ── UI: Drop zones ──
+document.querySelectorAll('.drop-zone').forEach(zone => {
+  const input = zone.querySelector('input[type="file"]');
+  const explType = zone.dataset.type;
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', async e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) await handleFile(file, explType);
+  });
+
+  input.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (file) await handleFile(file, explType);
+  });
+});
+
+async function handleFile(file, zoneType) {
+  if (!file.name.endsWith('.parquet')) {
+    showError('Fichier non .parquet : ' + file.name);
+    return;
+  }
+
+  const overlay = $('loadingOverlay');
+  overlay.classList.add('show');
+  $('loadText').textContent = `Lecture de ${file.name}…`;
+
+  try {
+    const result = await processFile(file, null);
+    const type = result.type;
+
+    state.files[type] = file;
+    state.data[type] = result.data;
+
+    // Update the correct zone UI
+    const zone = document.querySelector(`.drop-zone[data-type="${type}"]`);
+    zone.classList.add('loaded');
+    const statusEl = $('status' + type.charAt(0).toUpperCase() + type.slice(1));
+    statusEl.textContent = `✓ ${file.name} (${result.rows} jours)`;
+    statusEl.style.color = type === 'pred' ? 'var(--accent-ml)' : type === 'base' ? 'var(--accent-base)' : 'var(--accent-real)';
+
+    // If dropped in wrong zone, let user know it was auto-detected
+    if (type !== zoneType) {
+      statusEl.textContent += ' (auto-détecté)';
+    }
+
+    checkReady();
+  } catch (err) {
+    console.error(err);
+    showError('Erreur: ' + err.message);
+  } finally {
+    overlay.classList.remove('show');
+  }
+}
+
+function checkReady() {
+  const allLoaded = state.files.load && state.files.pred && state.files.base;
+  $('launchBtn').classList.toggle('ready', allLoaded);
+}
+
+// ── Launch chart ──
+$('launchBtn').addEventListener('click', () => {
+  if (!state.files.load || !state.files.pred || !state.files.base) return;
+
+  // Compute common dates (join by date, not position!)
+  const datesLoad = new Set(Object.keys(state.data.load));
+  const datesPred = new Set(Object.keys(state.data.pred));
+  const datesBase = new Set(Object.keys(state.data.base));
+
+  const common = [...datesPred].filter(d => datesLoad.has(d) && datesBase.has(d)).sort();
+
+  if (common.length === 0) {
+    showError('Aucune date en commun entre les 3 fichiers !');
+    return;
+  }
+
+  state.dates = common;
+
+  $('uploadScreen').style.display = 'none';
+  $('chartScreen').style.display = 'block';
+
+  initChart();
+});
+
+// ── Reset ──
+$('resetBtn').addEventListener('click', () => {
+  state.files = { load: null, pred: null, base: null };
+  state.data = { load: {}, pred: {}, base: {} };
+  state.dates = [];
+  if (state.chart) { state.chart.destroy(); state.chart = null; }
+
+  document.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('loaded'));
+  ['statusLoad', 'statusPred', 'statusBase'].forEach(id => { $(id).textContent = ''; });
+  $('launchBtn').classList.remove('ready');
+
+  $('chartScreen').style.display = 'none';
+  $('uploadScreen').style.display = 'flex';
+
+  // Reset file inputs
+  document.querySelectorAll('.drop-zone input[type="file"]').forEach(i => i.value = '');
+});
+
+// ── Chart ──
+function initChart() {
+  const dates = state.dates;
+  const picker = $('datePicker');
+  picker.min = dates[0];
+  picker.max = dates[dates.length - 1];
+  picker.value = dates[0];
+
+  $('dateInfo').textContent = `${dates.length} jours · ${dates[0]} → ${dates[dates.length - 1]}`;
+
+  const timeLabels = [];
+  for (let i = 0; i < 96; i++) {
+    const h = Math.floor(i * 15 / 60);
+    const m = (i * 15) % 60;
+    timeLabels.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+  }
+
+  const ctx = $('chart').getContext('2d');
+
+  if (state.chart) state.chart.destroy();
+
+  state.chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: timeLabels,
+      datasets: [
+        {
+          label: 'Load réel',
+          data: [],
+          borderColor: '#e2e8f0',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.3,
+          order: 1
+        },
+        {
+          label: 'Prédiction ML',
+          data: [],
+          borderColor: '#38bdf8',
+          borderWidth: 2,
+          pointRadius: 0,
+          borderDash: [6, 3],
+          tension: 0.3,
+          order: 2
+        },
+        {
+          label: 'Baseline',
+          data: [],
+          borderColor: '#fb923c',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          borderDash: [3, 3],
+          tension: 0,
+          order: 3
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 2.2,
+      animation: { duration: 200 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#111a2e',
+          borderColor: '#1c2d4a',
+          borderWidth: 1,
+          titleFont: { family: 'IBM Plex Mono', size: 12 },
+          bodyFont: { family: 'IBM Plex Mono', size: 11 },
+          padding: 10,
+          callbacks: {
+            title: items => picker.value + ' ' + items[0].label,
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(4) ?? 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(92,120,160,0.08)' },
+          ticks: { color: '#5a6f8a', font: { family: 'IBM Plex Mono', size: 10 }, maxTicksLimit: 12, maxRotation: 0 }
+        },
+        y: {
+          grid: { color: 'rgba(92,120,160,0.08)' },
+          ticks: { color: '#5a6f8a', font: { family: 'IBM Plex Mono', size: 10 } },
+          title: { display: true, text: 'Load (normalized)', color: '#5a6f8a', font: { family: 'Outfit', size: 12 } }
+        }
+      }
+    }
+  });
+
+  picker.addEventListener('change', () => updateChart(picker.value));
+
+  $('prevBtn').addEventListener('click', () => {
+    const idx = dates.indexOf(picker.value);
+    if (idx > 0) { picker.value = dates[idx - 1]; updateChart(picker.value); }
+  });
+
+  $('nextBtn').addEventListener('click', () => {
+    const idx = dates.indexOf(picker.value);
+    if (idx < dates.length - 1) { picker.value = dates[idx + 1]; updateChart(picker.value); }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') $('prevBtn').click();
+    if (e.key === 'ArrowRight') $('nextBtn').click();
+  });
+
+  updateChart(dates[0]);
+}
+
+function updateChart(date) {
+  const loadArr = state.data.load[date];
+  const predArr = state.data.pred[date];
+  const baseArr = state.data.base[date];
+
+  if (!loadArr || !predArr || !baseArr) return;
+
+  const chart = state.chart;
+  chart.data.datasets[0].data = loadArr;
+  chart.data.datasets[1].data = predArr;
+  chart.data.datasets[2].data = baseArr;
+  chart.update('none');
+
+  // Metrics
+  let sumAbsML = 0, sumAbsBase = 0, sumSqML = 0, sumSqBase = 0, n = 0;
+  for (let i = 0; i < 96; i++) {
+    const l = loadArr[i], p = predArr[i], b = baseArr[i];
+    if (l == null || p == null || b == null) continue;
+    const eML = Math.abs(p - l);
+    const eBase = Math.abs(b - l);
+    sumAbsML += eML;
+    sumAbsBase += eBase;
+    sumSqML += (p - l) ** 2;
+    sumSqBase += (b - l) ** 2;
+    n++;
+  }
+
+  if (n > 0) {
+    const maeML = sumAbsML / n;
+    const maeBase = sumAbsBase / n;
+    const rmseML = Math.sqrt(sumSqML / n);
+    const rmseBase = Math.sqrt(sumSqBase / n);
+
+    $('maeML').textContent = maeML.toFixed(4);
+    $('maeBase').textContent = maeBase.toFixed(4);
+    $('rmseML').textContent = rmseML.toFixed(4);
+    $('rmseBase').textContent = rmseBase.toFixed(4);
+
+    const imp = (maeBase - maeML) / maeBase * 100;
+    const impEl = $('improvement');
+    impEl.textContent = (imp > 0 ? '+' : '') + imp.toFixed(1) + '%';
+    impEl.style.color = imp > 0 ? 'var(--accent-good)' : 'var(--accent-bad)';
+  } else {
+    ['maeML', 'maeBase', 'rmseML', 'rmseBase', 'improvement'].forEach(id => $(id).textContent = '—');
+  }
+
+  // Day info
+  const dayIdx = state.dates.indexOf(date);
+  $('dateInfo').textContent = `Jour ${dayIdx + 1}/${state.dates.length} · ${state.dates.length} jours en commun`;
+}
+
+// ── Init parquet-wasm ──
+await initParquet();
+</script>
+</body>
+</html>
