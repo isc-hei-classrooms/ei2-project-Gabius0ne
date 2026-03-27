@@ -1,5 +1,5 @@
 """
-train_lgbm_optuna_v7.py
+train_lgbm_optuna_v8.py
 =======================
 Tuning Optuna des hyperparamètres LightGBM pour les 96 modèles indépendants.
 

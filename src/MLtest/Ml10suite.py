@@ -1,5 +1,5 @@
 """
-train_lgbm_v10_split_day_night.py
+train_lgbm_v9_split_day_night.py
 ================================
 Entraînement LightGBM avec hyperparamètres séparés jour/nuit.
 
@@ -16,7 +16,11 @@ Chaque groupe développe ses propres hyperparamètres optimaux.
 Les prédictions sont fusionnées pour l'évaluation globale.
 
 Features : v9 (identiques, pas de changement)
-Split : 60% train / 20% val (Optuna) / 20% test
+Split : 60% train / 20% val (Optuna + early stopping) / 20% test (évaluation seule)
+
+CORRECTION LEAKAGE : l'entraînement final (section 4) utilise le val set
+pour l'early stopping, JAMAIS le test set. Les best_iterations par pas
+sont sauvegardés pour le script final de production.
 
 Sorties :
   DATA/models9/lgbm_t{000..095}.pkl
@@ -24,6 +28,7 @@ Sorties :
   DATA/models9/predictions_test.parquet
   DATA/models9/best_params_night.json
   DATA/models9/best_params_day.json
+  DATA/models9/best_iterations.json        ← NOUVEAU
 """
 
 import polars as pl
@@ -41,10 +46,10 @@ from optuna.samplers import TPESampler
 # ─────────────────────────────────────────────
 BASE = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA")
 
-X_PATH = BASE / "processed" / "X_features_v11.parquet"
-Y_PATH = BASE / "processed" / "Y_target_v11.parquet"
-B_PATH = BASE / "processed" / "B_baseline_v11.parquet"
-OUT    = BASE / "models10.2"
+X_PATH = BASE / "processed" / "X_features_v10.parquet"
+Y_PATH = BASE / "processed" / "Y_target_v10.parquet"
+B_PATH = BASE / "processed" / "B_baseline_v10.parquet"
+OUT    = BASE / "models10suite"
 OUT.mkdir(exist_ok=True)
 
 TRAIN_RATIO = 0.60
@@ -187,18 +192,21 @@ with open(OUT / "best_params_day.json", "w") as f:
 
 
 # ─────────────────────────────────────────────
-# 4. ENTRAÎNEMENT FINAL — train+val → test
+# 4. ENTRAÎNEMENT FINAL — train avec early stopping sur val, évaluation sur test
+#
+# ANTI-LEAKAGE : on entraîne sur train seul, early stopping sur val.
+# Le test set n'est JAMAIS vu par le modèle ni utilisé pour la sélection.
+# Les best_iterations sont sauvegardés pour le script de production
+# (qui pourra entraîner sur train+val avec num_boost_round fixe).
 # ─────────────────────────────────────────────
 
-print(f"\n=== Entraînement final (96 modèles, hyperparamètres séparés) ===")
-
-X_trainval = np.concatenate([X_train, X_val], axis=0)
-Y_trainval = np.concatenate([Y_train, Y_val], axis=0)
+print(f"\n=== Entraînement final (96 modèles, early stopping sur val) ===")
 
 night_set = set(NIGHT_STEPS)
 
 preds_test = np.zeros_like(Y_test)
 metrics    = []
+best_iterations = {}  # {step: best_iteration} pour le script de production
 
 for t in range(n_steps):
     # Choisir les hyperparamètres selon le groupe
@@ -214,22 +222,26 @@ for t in range(n_steps):
         **best_params,
     }
 
-    y_tv = Y_trainval[:, t]
+    y_tr = Y_train[:, t]
+    y_va = Y_val[:, t]
     y_te = Y_test[:, t]
-    mask_tv = ~np.isnan(y_tv)
+    mask_tr = ~np.isnan(y_tr)
+    mask_va = ~np.isnan(y_va)
     mask_te = ~np.isnan(y_te)
 
-    dtrain = lgb.Dataset(X_trainval[mask_tv], label=y_tv[mask_tv],
+    dtrain = lgb.Dataset(X_train[mask_tr], label=y_tr[mask_tr],
                          feature_name=feat_names, free_raw_data=False)
-    dtest = lgb.Dataset(X_test[mask_te], label=y_te[mask_te],
-                        reference=dtrain, free_raw_data=False)
+    dval = lgb.Dataset(X_val[mask_va], label=y_va[mask_va],
+                       reference=dtrain, free_raw_data=False)
 
     model = lgb.train(
         final_params, dtrain, num_boost_round=N_ESTIMATORS_MAX,
-        valid_sets=[dtest],
+        valid_sets=[dval],
         callbacks=[lgb.early_stopping(EARLY_STOPPING, verbose=False),
                    lgb.log_evaluation(-1)],
     )
+
+    best_iterations[t] = model.best_iteration
 
     pred_t = model.predict(X_test)
     preds_test[:, t] = pred_t
@@ -258,7 +270,15 @@ for t in range(n_steps):
 
     if t % 12 == 0:
         base_str = f"{rmse_b:.4f}" if rmse_b is not None else "N/A"
-        print(f"  t={t:03d} ({metrics[-1]['time_label']}) [{group_label}] — RMSE model={rmse_m:.4f} | baseline={base_str}")
+        print(f"  t={t:03d} ({metrics[-1]['time_label']}) [{group_label}] — RMSE model={rmse_m:.4f} | baseline={base_str} | n_est={model.best_iteration}")
+
+# Sauvegarder best_iterations pour le script de production
+with open(OUT / "best_iterations.json", "w") as f:
+    json.dump({str(k): v for k, v in best_iterations.items()}, f, indent=2)
+
+print(f"\n  best_iteration stats:")
+iters = list(best_iterations.values())
+print(f"    min={min(iters)} | median={int(np.median(iters))} | max={max(iters)} | mean={np.mean(iters):.0f}")
 
 
 # ─────────────────────────────────────────────
@@ -344,3 +364,4 @@ print(f"✓ Métriques : {OUT}/metrics.parquet")
 print(f"✓ Prédictions : {OUT}/predictions_test.parquet")
 print(f"✓ Params nuit : {OUT}/best_params_night.json")
 print(f"✓ Params jour : {OUT}/best_params_day.json")
+print(f"✓ Best iterations : {OUT}/best_iterations.json")
