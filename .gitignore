@@ -4,9 +4,7 @@ __pycache__/
 *$py.class
 
 # User defined folders
-data/
 containers/
-models/
 
 # Data files (we usually don't want them to be stored in git)
 *.csv
