@@ -412,7 +412,8 @@
 </div>
 
 <script type="module">
-import { parquetRead, parquetMetadataAsync, parquetSchema } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.7.1/src/hyparquet.min.js';
+import { parquetRead, parquetMetadataAsync, parquetSchema } 
+from 'https://cdn.jsdelivr.net/npm/hyparquet@1.7.1/+esm';
 
 // ── State ──
 const loaded = { real: null, pred: null, base: null };
@@ -826,7 +827,7 @@ async function preloadFixedFiles() {
     document.getElementById('statusReal').textContent =
       '✓ target chargée automatiquement';
 
-    loaded.pred = await loadParquetFromUrl('./P_prediction.parquet');
+    loaded.pred = await loadParquetFromUrl('./prediction.parquet?v=' + Date.now());
     document.getElementById('zonePred').classList.add('loaded');
     document.getElementById('statusPred').textContent =
       '✓ prediction chargée automatiquement';
@@ -837,6 +838,7 @@ async function preloadFixedFiles() {
     console.error("Erreur preload:", e);
   }
 }
+
 preloadFixedFiles();
 </script>
 </body>
