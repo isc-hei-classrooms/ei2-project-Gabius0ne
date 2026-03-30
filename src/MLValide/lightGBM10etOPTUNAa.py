@@ -39,13 +39,13 @@ from optuna.samplers import TPESampler
 # ─────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────
-BASE = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA")
+BASE = Path(__file__).resolve().parents[2] / "DATA"
 
 X_PATH = BASE / "processed" / "X_features_v11.parquet"
 Y_PATH = BASE / "processed" / "Y_target_v11.parquet"
 B_PATH = BASE / "processed" / "B_baseline_v11.parquet"
-OUT    = BASE / "models10.2"
-OUT.mkdir(exist_ok=True)
+OUT    = BASE / "models11"
+OUT.mkdir(parents=True, exist_ok=True)
 
 TRAIN_RATIO = 0.60
 VAL_RATIO   = 0.20

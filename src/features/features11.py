@@ -31,11 +31,11 @@ from datetime import timedelta, date
 # ─────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────
-BASE    = Path(r"C:\Users\gab1a\OneDrive\Documents\energyinfo2\DATA")
+BASE    = Path(__file__).resolve().parents[2] / "DATA"
 CSV     = BASE / "oiken-data.csv"
 METEO   = BASE / "meteo_multistation_v5.parquet"
 OUT     = BASE / "processed"
-OUT.mkdir(exist_ok=True)
+OUT.mkdir(parents=True, exist_ok=True)
 
 PROD_COLS = [
     "solar_central_valais",
