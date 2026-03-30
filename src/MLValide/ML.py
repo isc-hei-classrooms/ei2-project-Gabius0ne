@@ -41,10 +41,10 @@ from optuna.samplers import TPESampler
 # ─────────────────────────────────────────────
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_features_v11.parquet"
-Y_PATH = BASE / "processed" / "Y_target_v11.parquet"
-B_PATH = BASE / "processed" / "B_baseline_v11.parquet"
-OUT    = BASE / "models11"
+X_PATH = BASE / "processed" / "X_features_v12.parquet"
+Y_PATH = BASE / "processed" / "Y_target_v12.parquet"
+B_PATH = BASE / "processed" / "B_baseline_v12.parquet"
+OUT    = BASE / "models12"
 OUT.mkdir(parents=True, exist_ok=True)
 
 TRAIN_RATIO = 0.60
