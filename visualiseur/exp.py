@@ -4,8 +4,8 @@ from pathlib import Path
 
 HERE      = Path(__file__).resolve().parent
 PRED_FILE = HERE / "predictions_test.parquet"
-BASE_FILE = HERE / "B_baseline_v11.parquet"
-REAL_FILE = HERE / "Y_target_v11.parquet"
+BASE_FILE = HERE / "B_baseline_v12.parquet"
+REAL_FILE = HERE / "Y_target_v12.parquet"
 OUTPUT    = HERE / "forecast_data.csv"
 
 # ── Chargement ──
