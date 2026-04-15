@@ -55,22 +55,22 @@ from optuna.samplers import TPESampler
 # Chemins : le script est censé tourner depuis src/ML/, remonte 2 niveaux pour DATA/
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_features_v12.parquet"   # features v12
-Y_PATH = BASE / "processed" / "Y_target_v12.parquet"     # cible : load net normalisé (96 pas)
-B_PATH = BASE / "processed" / "B_baseline_v12.parquet"   # baseline Oiken pour comparaison
-OUT    = BASE / "models12"
+X_PATH = BASE / "processed" / "X_features_v13.parquet"   # features v12
+Y_PATH = BASE / "processed" / "Y_target_v13.parquet"     # cible : load net normalisé (96 pas)
+B_PATH = BASE / "processed" / "B_baseline_v13.parquet"   # baseline Oiken pour comparaison
+OUT    = BASE / "models13v0"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Split chronologique strict (pas de shuffle car données temporelles)
-TRAIN_RATIO = 0.60
+TRAIN_RATIO = 0.47
 VAL_RATIO   = 0.20
 # Le test prend le reste (20%) = la période la plus récente
 
 # Hyperparamètres d'entraînement
-N_OPTUNA_TRIALS  = 50     # nombre de combinaisons testées par Optuna par groupe
+N_OPTUNA_TRIALS  = 400     # nombre de combinaisons testées par Optuna par groupe
 N_ESTIMATORS_MAX = 1000   # plafond de boosting rounds (early stopping coupe avant)
 EARLY_STOPPING   = 50     # arrêt si pas d'amélioration val sur 50 rounds consécutifs
-RANDOM_SEED      = 42     # reproductibilité du sampler Optuna
+RANDOM_SEED      = 33     # reproductibilité du sampler Optuna
 
 # Jours où la baseline Oiken a des valeurs aberrantes (trou de données dans leur système)
 # Exclus UNIQUEMENT des métriques finales, pas de l'entraînement
@@ -86,19 +86,15 @@ EXCLUDE_DATES = {date(2025, 9, 13), date(2025, 9, 14), date(2025, 9, 15)}
 #   - NUIT : pas de PV → conso brute → très prédictible, signal simple
 #   - JOUR : conso brute - PV → signal complexe, bruit PV dominant
 #
-# ATTENTION : le docstring de la config dit "JOUR = 09h-14h45" mais
-# les indices ci-dessous définissent JOUR = 12h-17h45. Ce sont les
-# indices qui font foi. À harmoniser dans une prochaine version ou
-# à vérifier lequel des deux est le choix voulu — c'est un point à clarifier
 # car selon le choix, le biais diurne observé peut se déplacer de tranche.
-NIGHT_STEPS = list(range(0, 48)) + list(range(72, 96))   # 00h-11h45 + 18h-23h45
-DAY_STEPS   = list(range(48, 72))                         # 12h-17h45
+NIGHT_STEPS = list(range(0, 40)) + list(range(68, 96))   # 00h-09h45 + 17h-23h45
+DAY_STEPS   = list(range(40, 68))                         # 10h-16h45
 
 # Optuna ne teste pas tous les pas (trop coûteux) : on sélectionne quelques
 # pas représentatifs pour évaluer la qualité d'un jeu d'hyperparamètres.
 # Le RMSE moyen sur ces pas sert de score à minimiser.
 # Le choix des pas doit couvrir les heures caractéristiques du groupe.
-OPTUNA_STEPS_DAY   = [48, 52, 56, 60, 68]   # 12h, 13h, 14h, 15h, 17h — cœur du jour
+OPTUNA_STEPS_DAY   = [48, 52, 54, 56, 58]   # 12h, 13h, 14h, 15h, 17h — cœur du jour
 OPTUNA_STEPS_NIGHT = [0, 12, 28, 72, 84, 92]  # 00h, 03h, 07h, 18h, 21h, 23h
 
 
@@ -209,8 +205,8 @@ print(f"  Samples : {n_samples} jours")
 print(f"  Features : {X_arr.shape[1]}")
 print(f"  Pas de temps : {n_steps}")
 # REMARQUE : les libellés ci-dessous reflètent le choix NIGHT/DAY réel (indices 48-72)
-print(f"  Groupe NUIT : {len(NIGHT_STEPS)} pas (00h-11h45 + 18h-23h45)")
-print(f"  Groupe JOUR : {len(DAY_STEPS)} pas (12h-17h45)")
+print(f"  Groupe NUIT : {len(NIGHT_STEPS)} pas (00h-10h + 17h-23h45)")
+print(f"  Groupe JOUR : {len(DAY_STEPS)} pas (10h-17h00)")
 
 # ─────────────────────────────────────────────────────────────────────
 # 2. SPLIT TRAIN / VAL / TEST (chronologique strict)
@@ -523,13 +519,11 @@ for group, steps in [("NUIT", NIGHT_STEPS), ("JOUR", DAY_STEPS)]:
 # ─────────────────────────────────────────────────────────────────────
 # 7. DIAGNOSTIC : BIAIS DIURNE PAR MOIS
 # ─────────────────────────────────────────────────────────────────────
-# Sur la tranche diurne 09h-15h UTC (indices 36-59, couvrant le pic PV),
+# Sur la tranche diurne 10h-17h UTC (indices 40-68, couvrant le pic PV),
 # on calcule pour chaque jour le biais moyen = moyenne(réel - prédit).
 # Puis on agrège par mois pour voir si le biais a une saisonnalité,
 # ce qui signalerait un problème structurel de modélisation PV.
 #
-# REMARQUE : la tranche diagnostic (36-59 = 09h-14h45) est FIXE ici,
-# indépendamment de la définition DAY_STEPS du modèle. C'est voulu :
 # on veut toujours diagnostiquer les heures à fort PV, pas les heures
 # que le modèle considère comme "JOUR".
 #
@@ -539,8 +533,8 @@ for group, steps in [("NUIT", NIGHT_STEPS), ("JOUR", DAY_STEPS)]:
 #   biais < 0 : réel < prédit → prédit trop haut → modèle sous-estime le PV
 #               (soustrait pas assez de PV → load net sur-évalué)
 
-print(f"\n=== Diagnostic biais diurne (09h-15h) ===")
-day_steps = list(range(36, 60))   # 09h00-14h45 UTC, tranche pic PV
+print(f"\n=== Diagnostic biais diurne (10h-17h) ===")
+day_steps = list(range(40, 68))   # 10h00-17h00 UTC, tranche pic PV
 
 # Biais journalier agrégé par mois
 monthly_bias = defaultdict(list)
