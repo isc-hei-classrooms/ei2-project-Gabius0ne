@@ -4,9 +4,9 @@ from pathlib import Path
 
 HERE      = Path(__file__).resolve().parent
 PRED_FILE = HERE / "predictions_test.parquet"
-BASE_FILE = HERE / "B_baseline_v12.parquet"
-REAL_FILE = HERE / "Y_target_v12.parquet"
-OUTPUT    = HERE / "forecast_data.csv"
+BASE_FILE = HERE / "B_baseline_v13.parquet"
+REAL_FILE = HERE / "Y_target_v13.parquet"
+OUTPUT    = HERE / "forecast_data13.csv"
 
 # ── Chargement ──
 preds = pd.read_parquet(PRED_FILE).set_index('date')
