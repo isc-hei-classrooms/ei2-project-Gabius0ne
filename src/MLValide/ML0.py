@@ -1,13 +1,15 @@
 """
-train_lgbm_v12.py
+train_lgbm_v13.py
 =================
-Entraînement LightGBM v12 avec features d'interaction PV.
+Entraînement LightGBM v13 avec features v13 (irradiance plaine diurne,
+wind speed restreint, variances irradiance supprimées, météo J supprimée,
+vacances scolaires + ponts ajoutés).
 
 OBJECTIF
 --------
 Prédire la charge nette normalisée d'Oiken pour les 96 pas de 15 min
-du jour J+1, à partir des features v12 (météo prévue, load historique,
-production PV mesurée, interactions irradiance × capacité PV).
+du jour J+1, à partir des features v13 (météo prévue, load historique,
+production PV mesurée, interactions irradiance × pv_yield).
 
 ARCHITECTURE
 ------------
@@ -19,9 +21,14 @@ ARCHITECTURE
 
 STRATÉGIE D'ÉVALUATION
 ----------------------
-- Split chronologique 60% train / 20% val / 20% test (strict, pas de shuffle).
-- Optuna optimise sur val, early stopping sur val, test jamais touché
-  pendant l'entraînement.
+- Split chronologique 47% train / 20% val / 33% test (strict, pas de shuffle).
+- Optuna optimise ses hyperparamètres en entraînant sur train et en
+  évaluant sur val. Le test set n'est jamais touché pendant le tuning.
+- Entraînement final en deux étapes :
+    1) ES propre sur train seul + val pour déterminer best_iteration
+    2) Réentraînement sur train ∪ val avec num_boost_round = best_iteration
+  Cette séparation évite l'incohérence d'un ES calculé sur des données
+  déjà vues en entraînement.
 - Exclusion des 13-15 septembre 2025 des métriques finales : la baseline
   Oiken est anormalement dégradée sur ces 3 jours (probablement un bug
   de leur système de prévision) et gonflerait artificiellement
@@ -29,11 +36,11 @@ STRATÉGIE D'ÉVALUATION
 
 SORTIES
 -------
-  DATA/models12/lgbm_t{000..095}.pkl     — 96 modèles sérialisés
-  DATA/models12/metrics.parquet          — RMSE/MAE par pas de temps
-  DATA/models12/predictions_test.parquet — prédictions sur le test set
-  DATA/models12/best_params_night.json   — hyperparamètres NUIT
-  DATA/models12/best_params_day.json     — hyperparamètres JOUR
+  DATA/models13v1/lgbm_t{000..095}.pkl     — 96 modèles sérialisés
+  DATA/models13v1/metrics.parquet          — RMSE/MAE par pas de temps
+  DATA/models13v1/predictions_test.parquet — prédictions sur le test set
+  DATA/models13v1/best_params_night.json   — hyperparamètres NUIT+HORS-PIC
+  DATA/models13v1/best_params_day.json     — hyperparamètres JOUR (pic PV)
 """
 
 import polars as pl
@@ -55,22 +62,22 @@ from optuna.samplers import TPESampler
 # Chemins : le script est censé tourner depuis src/ML/, remonte 2 niveaux pour DATA/
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_features_v13.parquet"   # features v12
+X_PATH = BASE / "processed" / "X_features_v13.parquet"   # features v13
 Y_PATH = BASE / "processed" / "Y_target_v13.parquet"     # cible : load net normalisé (96 pas)
 B_PATH = BASE / "processed" / "B_baseline_v13.parquet"   # baseline Oiken pour comparaison
-OUT    = BASE / "models13v0"
+OUT    = BASE / "models13v1"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Split chronologique strict (pas de shuffle car données temporelles)
 TRAIN_RATIO = 0.47
 VAL_RATIO   = 0.20
-# Le test prend le reste (20%) = la période la plus récente
+# Le test prend le reste (33%) = la période la plus récente
 
 # Hyperparamètres d'entraînement
-N_OPTUNA_TRIALS  = 400     # nombre de combinaisons testées par Optuna par groupe
+N_OPTUNA_TRIALS  = 400    # nombre de combinaisons testées par Optuna par groupe
 N_ESTIMATORS_MAX = 1000   # plafond de boosting rounds (early stopping coupe avant)
 EARLY_STOPPING   = 50     # arrêt si pas d'amélioration val sur 50 rounds consécutifs
-RANDOM_SEED      = 33     # reproductibilité du sampler Optuna
+RANDOM_SEED      = 24     # reproductibilité du sampler Optuna
 
 # Jours où la baseline Oiken a des valeurs aberrantes (trou de données dans leur système)
 # Exclus UNIQUEMENT des métriques finales, pas de l'entraînement
@@ -80,13 +87,16 @@ EXCLUDE_DATES = {date(2025, 9, 13), date(2025, 9, 14), date(2025, 9, 15)}
 # GROUPES JOUR / NUIT
 # ─────────────────────────────────────────────────────────────────────
 # Les 96 pas de 15 min représentent 00h00 à 23h45 UTC.
-# step 0 = 00h00, step 48 = 12h00, step 72 = 18h00, step 95 = 23h45.
+# step 0 = 00h00, step 40 = 10h00, step 68 = 17h00, step 95 = 23h45.
 #
 # On sépare en 2 groupes parce que le signal est structurellement différent :
-#   - NUIT : pas de PV → conso brute → très prédictible, signal simple
-#   - JOUR : conso brute - PV → signal complexe, bruit PV dominant
+#   - "NUIT" (incl. tôt matin et soir) : pas/peu de PV → conso brute → prédictible
+#   - "JOUR" (pic PV, 10h-17h UTC)     : conso brute - PV → signal complexe
 #
-# car selon le choix, le biais diurne observé peut se déplacer de tranche.
+# Remarque : "NIGHT_STEPS" inclut aussi les heures 00h-10h et 17h-23h45,
+# donc ce n'est pas strictement la nuit au sens astronomique. Le nom est
+# conservé pour cohérence avec la littérature mais désigne en réalité
+# "hors pic PV". Le groupe DAY_STEPS couvre la tranche de forte production PV.
 NIGHT_STEPS = list(range(0, 40)) + list(range(68, 96))   # 00h-09h45 + 17h-23h45
 DAY_STEPS   = list(range(40, 68))                         # 10h-16h45
 
@@ -94,8 +104,8 @@ DAY_STEPS   = list(range(40, 68))                         # 10h-16h45
 # pas représentatifs pour évaluer la qualité d'un jeu d'hyperparamètres.
 # Le RMSE moyen sur ces pas sert de score à minimiser.
 # Le choix des pas doit couvrir les heures caractéristiques du groupe.
-OPTUNA_STEPS_DAY   = [48, 52, 54, 56, 58]   # 12h, 13h, 14h, 15h, 17h — cœur du jour
-OPTUNA_STEPS_NIGHT = [0, 12, 28, 72, 84, 92]  # 00h, 03h, 07h, 18h, 21h, 23h
+OPTUNA_STEPS_DAY   = [48, 52, 54, 56, 58]      # 12h, 13h, 13h30, 14h, 14h30 — cœur du pic PV
+OPTUNA_STEPS_NIGHT = [0, 12, 28, 72, 84, 92]   # 00h, 03h, 07h, 18h, 21h, 23h
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -107,36 +117,41 @@ OPTUNA_STEPS_NIGHT = [0, 12, 28, 72, 84, 92]  # 00h, 03h, 07h, 18h, 21h, 23h
 # (ex. beaucoup de poids sur "PV prévu" en JOUR est un bon signe).
 
 def classify_feature(name: str) -> str:
-    """Attribue un thème à une feature selon son préfixe/contenu."""
+    """Attribue un thème à une feature selon son préfixe/contenu.
+
+    Les catégories 'predJ_*' (météo prévue J) sont conservées comme filet
+    de sécurité mais ne devraient rien capturer en v13 (features supprimées).
+    """
     # Load historique (le plus gros groupe : 196 features, J-1 à J-7)
     if name.startswith("load_"):
         return "Load historique"
     # Production PV mesurée + capacité + ratios de yield
     if name.startswith("solar_") or "pv_yield" in name or "pv_capacity" in name or "remote_max" in name:
         return "PV mesuré / capacité"
-    # Features d'interaction irradiance × pv_yield (nouveautés v12)
+    # Features d'interaction irradiance × pv_yield (v12, conservées en v13)
     if name.startswith("pred_pv_adj"):
         return "PV prévu (interaction)"
     # Irradiance prévue brute
     if name.startswith("pred_glob_rad"):
         return "Irradiance prévue J+1"
     if name.startswith("predJ_glob_rad"):
-        return "Irradiance prévue J"
+        return "Irradiance prévue J (obsolète v13)"
     # Variables météo prévues J+1 (hors vent/pluie/soleil qui sont groupés à part)
     if name.startswith("pred_temp") or name.startswith("pred_pressure") or name.startswith("pred_relhum"):
         return "Météo prévue J+1 (temp/pres/hum)"
     if name.startswith("predJ_temp") or name.startswith("predJ_pressure") or name.startswith("predJ_relhum"):
-        return "Météo prévue J (temp/pres/hum)"
+        return "Météo prévue J (obsolète v13)"
     # Vent + précipitations + ensoleillement (variables plus bruitées ou proxy indirect)
     if name.startswith("pred_wind") or name.startswith("pred_precip") or name.startswith("pred_sunshine"):
         return "Météo prévue J+1 (vent/pluie/soleil)"
     if name.startswith("predJ_wind") or name.startswith("predJ_precip") or name.startswith("predJ_sunshine"):
-        return "Météo prévue J (vent/pluie/soleil)"
+        return "Météo prévue J (obsolète v13)"
     # Mesures météo réelles (J-1 + J matin jusqu'à 10h)
     if name.startswith("rmet_"):
         return "Météo mesurée"
-    # Calendaire
+    # Calendaire (v13 : ajout des vacances scolaires et ponts)
     if name in ("dayofweek", "sin_dow", "cos_dow", "is_weekend", "is_holiday",
+                "is_school_holiday", "is_bridge_day",
                 "month", "sin_month", "cos_month", "sin_doy", "cos_doy"):
         return "Calendaire"
     if "ramadan" in name:
@@ -146,9 +161,9 @@ def classify_feature(name: str) -> str:
 
 def print_grouped_importance(feat_names, models, group_name, top_n=20):
     """
-    feat_names = nom
-    models = 96 sorties
-    group_name = JOUR ou NUIT
+    feat_names : liste de noms de features (ordre aligné avec X)
+    models     : liste des lgb.Booster entraînés pour un groupe (JOUR ou NUIT)
+    group_name : libellé ("JOUR" ou "NUIT") pour l'affichage
     Agrège les feature importances sur l'ensemble des modèles d'un groupe,
     affiche la répartition par thème + le top N des features individuelles.
     """
@@ -195,8 +210,10 @@ B = pl.read_parquet(B_PATH)
 dates = X["date"]
 feat_names = [c for c in X.columns if c != "date"]
 
-# Conversion en numpy float32 pour LightGBM (plus rapide, moins de mémoire)
-# LightGBM gère nativement les NaN, pas besoin de les imputer
+# Conversion en numpy float32 pour LightGBM (plus rapide, moins de mémoire).
+# LightGBM gère nativement les NaN, pas besoin de les imputer.
+# On drop la colonne "date" car elle est non-numérique et sert seulement
+# d'index temporel pour aligner X/Y/B.
 X_arr = X.drop("date").to_numpy().astype(np.float32)
 Y_arr = Y.drop("date").to_numpy().astype(np.float32)
 B_arr = B.drop("date").to_numpy().astype(np.float32)
@@ -207,9 +224,8 @@ n_steps   = Y_arr.shape[1]   # 96 pas de 15 min
 print(f"  Samples : {n_samples} jours")
 print(f"  Features : {X_arr.shape[1]}")
 print(f"  Pas de temps : {n_steps}")
-# REMARQUE : les libellés ci-dessous reflètent le choix NIGHT/DAY réel (indices 48-72)
-print(f"  Groupe NUIT : {len(NIGHT_STEPS)} pas (00h-10h + 17h-23h45)")
-print(f"  Groupe JOUR : {len(DAY_STEPS)} pas (10h-17h00)")
+print(f"  Groupe NUIT (hors pic PV) : {len(NIGHT_STEPS)} pas (00h-09h45 + 17h-23h45)")
+print(f"  Groupe JOUR (pic PV)      : {len(DAY_STEPS)} pas (10h00-16h45)")
 
 # ─────────────────────────────────────────────────────────────────────
 # 2. SPLIT TRAIN / VAL / TEST (chronologique strict)
@@ -227,9 +243,9 @@ B_test                  = B_arr[split_val:]    # baseline seulement sur le test
 dates_test              = dates[split_val:]
 
 print(f"\n=== Split chronologique ===")
-print(f"  Train : {split_train} jours ({dates[0]} → {dates[split_train-1]})")
-print(f"  Val   : {split_val - split_train} jours ({dates[split_train]} → {dates[split_val-1]})")
-print(f"  Test  : {n_samples - split_val} jours ({dates[split_val]} → {dates[-1]})")
+print(f"  Train : {split_train} jours ({dates[0]} → {dates[split_train-1]})  [{TRAIN_RATIO*100:.0f}%]")
+print(f"  Val   : {split_val - split_train} jours ({dates[split_train]} → {dates[split_val-1]})  [{VAL_RATIO*100:.0f}%]")
+print(f"  Test  : {n_samples - split_val} jours ({dates[split_val]} → {dates[-1]})  [{(1-TRAIN_RATIO-VAL_RATIO)*100:.0f}%]")
 
 # Masque booléen pour exclure les 13-15 septembre des métriques finales.
 # Ces 3 jours sont gardés dans le test set mais ne comptent pas dans
@@ -249,30 +265,33 @@ print(f"  Dates exclues des métriques : {n_excluded} ({[str(d) for d in sorted(
 # donnait des hyperparamètres compromis (favorables à la nuit qui
 # domine en nombre de pas). Séparer les deux permet à chaque groupe
 # d'avoir des réglages adaptés à son type de signal.
+#
+# Pour chaque trial : entraînement sur X_train, early stopping sur X_val,
+# score = RMSE moyen sur val pour un sous-ensemble de pas représentatifs.
 
 def run_optuna(group_name, optuna_steps, n_trials):
     """
     Lance un tuning Optuna pour un groupe (NUIT ou JOUR).
     Pour chaque trial, entraîne un modèle par pas dans `optuna_steps`
-    et retourne la moyenne des RMSE sur validation comme score.
+    sur X_train et retourne la moyenne des RMSE sur X_val comme score.
     """
 
     def objective(trial):
         # Espace de recherche LightGBM — conservateur, couvre les cas usuels
         params = {
-            "objective":       "regression",
-            "metric":          "rmse",
-            "verbosity":       -1,         # silence LightGBM
-            "n_jobs":          -1,         # tous les cœurs dispo
-            "learning_rate":   trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
-            "num_leaves":      trial.suggest_int("num_leaves", 15, 127),
-            "max_depth":       trial.suggest_int("max_depth", 3, 12),
+            "objective":         "regression",
+            "metric":            "rmse",
+            "verbosity":         -1,         # silence LightGBM
+            "n_jobs":            -1,         # tous les cœurs dispo
+            "learning_rate":     trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+            "num_leaves":        trial.suggest_int("num_leaves", 15, 127),
+            "max_depth":         trial.suggest_int("max_depth", 3, 12),
             "min_child_samples": trial.suggest_int("min_child_samples", 5, 100),
-            "subsample":       trial.suggest_float("subsample", 0.5, 1.0),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.2, 1.0),
-            "reg_alpha":       trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
-            "reg_lambda":      trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
-            "min_split_gain":  trial.suggest_float("min_split_gain", 0.0, 1.0),
+            "subsample":         trial.suggest_float("subsample", 0.5, 1.0),
+            "colsample_bytree":  trial.suggest_float("colsample_bytree", 0.2, 1.0),
+            "reg_alpha":         trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+            "reg_lambda":        trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            "min_split_gain":    trial.suggest_float("min_split_gain", 0.0, 1.0),
         }
 
         rmse_list = []
@@ -292,7 +311,7 @@ def run_optuna(group_name, optuna_steps, n_trials):
             dval = lgb.Dataset(X_val[mask_va], label=y_va[mask_va],
                                reference=dtrain, free_raw_data=False)
 
-            # Entraînement avec early stopping sur val
+            # Entraînement avec early stopping sur val (val non inclus dans train)
             model = lgb.train(
                 params, dtrain, num_boost_round=N_ESTIMATORS_MAX,
                 valid_sets=[dval],
@@ -336,16 +355,36 @@ with open(OUT / "best_params_day.json", "w") as f:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 4. ENTRAÎNEMENT FINAL
+# 4. ENTRAÎNEMENT FINAL — DEUX ÉTAPES
 # ─────────────────────────────────────────────────────────────────────
-# On entraîne maintenant sur train+val concaténés (80% du dataset),
-# avec les hyperparamètres Optuna fixés. Un modèle par pas de temps.
-# Early stopping toujours sur val pour arrêter à la bonne itération
-# sans toucher le test set.
+# Pour chaque pas de temps, entraînement final en deux étapes :
+#
+# ÉTAPE 1 — Détermination de best_iteration (régularisation)
+#   - Entraînement sur X_train seul (47%)
+#   - Early stopping sur X_val (non inclus dans train)
+#   - On récupère best_iteration où la loss val est minimale
+#
+# ÉTAPE 2 — Modèle final (maximisation des données)
+#   - Entraînement sur X_train ∪ X_val (67%)
+#   - num_boost_round = best_iteration (fixe, pas d'ES)
+#   - Pas de valid_sets nécessaire
+#
+# Cette séparation évite le problème d'un ES calculé sur des données
+# déjà vues en entraînement (qui rendrait l'ES inefficace). Le test set
+# reste intact.
+#
+# Ajustement optionnel : comme la taille du train passe de 47% à 67%
+# (soit ~43% de données en plus), on applique un léger facteur
+# d'extension au best_iteration pour laisser le modèle exploiter cette
+# donnée supplémentaire (heuristique empirique).
 
-print(f"\n=== Entraînement final (96 modèles, hyperparamètres séparés) ===")
+ITER_SCALE = 1.10   # multiplier best_iter par 1.1 pour compenser 47% → 67%
 
-# Concaténation train+val pour maximiser les données d'entraînement final
+print(f"\n=== Entraînement final (96 modèles, 2 étapes)  ===")
+print(f"  Étape 1 : ES propre sur train → val pour déterminer best_iteration")
+print(f"  Étape 2 : réentraînement sur train+val avec num_boost_round fixé (× {ITER_SCALE})")
+
+# Concaténation train+val pour l'étape 2
 X_trainval = np.concatenate([X_train, X_val], axis=0)
 Y_trainval = np.concatenate([Y_train, Y_val], axis=0)
 
@@ -372,40 +411,54 @@ for t in range(n_steps):
     }
 
     # Target pour ce pas de temps
+    y_tr = Y_train[:, t]
+    y_va = Y_val[:, t]
     y_tv = Y_trainval[:, t]
     y_te = Y_test[:, t]
+    mask_tr = ~np.isnan(y_tr)
+    mask_va = ~np.isnan(y_va)
     mask_tv = ~np.isnan(y_tv)
     # Masque test = NaN + exclusion des 3 jours aberrants
     mask_te = ~np.isnan(y_te) & exclude_mask
 
-    # Dataset d'entraînement (train + val concaténés)
-    dtrain = lgb.Dataset(X_trainval[mask_tv], label=y_tv[mask_tv],
-                         feature_name=feat_names, free_raw_data=False)
+    # ── ÉTAPE 1 : ES propre sur train seul → val pour obtenir best_iter ─
+    # Sécurité : si pas assez de données valides, skip ce pas
+    if mask_tr.sum() < 10 or mask_va.sum() < 10:
+        print(f"  t={t:03d} — skip (données insuffisantes)")
+        preds_test[:, t] = np.nan
+        metrics.append({"step": t, "time_label": f"{(t * 15) // 60:02d}h{(t * 15) % 60:02d}",
+                        "group": group_label, "rmse_model": None, "mae_model": None,
+                        "rmse_baseline": None, "mae_baseline": None, "n_estimators": None})
+        continue
 
-    # Dataset d'early stopping : on utilise SEULEMENT le val set
-    # (pas le test set !) pour décider quand arrêter le boosting.
-    # C'est critique : utiliser le test set ici ferait fuiter de l'info
-    # et biaiserait les métriques finales.
-    mask_val_t = ~np.isnan(Y_val[:, t])
-    dval_es = lgb.Dataset(X_val[mask_val_t], label=Y_val[:, t][mask_val_t],
-                          reference=dtrain, free_raw_data=False)
+    dtrain_p1 = lgb.Dataset(X_train[mask_tr], label=y_tr[mask_tr],
+                            feature_name=feat_names, free_raw_data=False)
+    dval_p1   = lgb.Dataset(X_val[mask_va], label=y_va[mask_va],
+                            reference=dtrain_p1, free_raw_data=False)
 
-    # REMARQUE : il y a une petite incohérence ici — on entraîne sur
-    # X_trainval (qui inclut déjà X_val) ET on utilise X_val pour
-    # l'early stopping. LightGBM va donc valider sur des données
-    # qu'il a aussi vues en training, ce qui fait perdre le signal
-    # de régularisation de l'early stopping (loss val → 0 rapidement).
-    # Version plus propre : entraîner sur X_train seul avec early stopping
-    # sur X_val, récupérer le best_iteration, puis réentraîner sur
-    # X_trainval avec num_boost_round=best_iteration fixé.
-    
-    # À considérer pour une version propre du script.
-
-    model = lgb.train(
-        final_params, dtrain, num_boost_round=N_ESTIMATORS_MAX,
-        valid_sets=[dval_es],
+    model_p1 = lgb.train(
+        final_params, dtrain_p1, num_boost_round=N_ESTIMATORS_MAX,
+        valid_sets=[dval_p1],
         callbacks=[lgb.early_stopping(EARLY_STOPPING, verbose=False),
                    lgb.log_evaluation(-1)],
+    )
+    best_iter_raw = model_p1.best_iteration
+    # Garde-fou : si best_iteration est à 0 (ES n'a jamais trouvé d'amélioration),
+    # on retombe sur un défaut raisonnable
+    if best_iter_raw is None or best_iter_raw <= 0:
+        best_iter_raw = N_ESTIMATORS_MAX // 4
+    # Ajustement pour compenser l'augmentation de taille du train (47% → 67%)
+    best_iter_final = max(1, int(round(best_iter_raw * ITER_SCALE)))
+
+    # ── ÉTAPE 2 : réentraînement sur train+val avec num_boost_round fixé ─
+    dtrain_p2 = lgb.Dataset(X_trainval[mask_tv], label=y_tv[mask_tv],
+                            feature_name=feat_names, free_raw_data=False)
+
+    model = lgb.train(
+        final_params, dtrain_p2, num_boost_round=best_iter_final,
+        # Pas de valid_sets, pas d'early stopping : on fixe exactement
+        # best_iter_final itérations sur le dataset élargi.
+        callbacks=[lgb.log_evaluation(-1)],
     )
 
     # Prédiction sur le test set
@@ -426,15 +479,18 @@ for t in range(n_steps):
     mae_b  = float(mean_absolute_error(y_te[mask_b], b_t[mask_b]))          if mask_b.sum() > 0 else None
 
     # Enregistrement pour le parquet de métriques
+    # - n_estimators_es    : best_iter trouvé par ES phase 1 (avant ajustement)
+    # - n_estimators_final : nb réel d'arbres dans le modèle phase 2 (après × ITER_SCALE)
     metrics.append({
-        "step":           t,
-        "time_label":     f"{(t * 15) // 60:02d}h{(t * 15) % 60:02d}",
-        "group":          group_label,
-        "rmse_model":     rmse_m,
-        "mae_model":      mae_m,
-        "rmse_baseline":  rmse_b,
-        "mae_baseline":   mae_b,
-        "n_estimators":   model.best_iteration,
+        "step":               t,
+        "time_label":         f"{(t * 15) // 60:02d}h{(t * 15) % 60:02d}",
+        "group":              group_label,
+        "rmse_model":         rmse_m,
+        "mae_model":          mae_m,
+        "rmse_baseline":      rmse_b,
+        "mae_baseline":       mae_b,
+        "n_estimators_es":    best_iter_raw,
+        "n_estimators_final": best_iter_final,
     })
 
     # Sauvegarde du modèle (pickle → chargement rapide pour inférence)
@@ -445,7 +501,9 @@ for t in range(n_steps):
     if t % 12 == 0:
         base_str = f"{rmse_b:.4f}" if rmse_b is not None else "N/A"
         model_str = f"{rmse_m:.4f}" if rmse_m is not None else "N/A"
-        print(f"  t={t:03d} ({metrics[-1]['time_label']}) [{group_label}] — RMSE model={model_str} | baseline={base_str}")
+        print(f"  t={t:03d} ({metrics[-1]['time_label']}) [{group_label}] — "
+              f"RMSE model={model_str} | baseline={base_str} | "
+              f"iter_es={best_iter_raw} → final={best_iter_final}")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -485,7 +543,8 @@ for group, steps in [("NUIT", NIGHT_STEPS), ("JOUR", DAY_STEPS)]:
     mae_m  = float(mean_absolute_error(y_g[mask_m], p_g[mask_m]))
     mae_b  = float(mean_absolute_error(y_g[mask_b], b_g[mask_b]))
     imp = (1 - rmse_m / rmse_b) * 100
-    print(f"  {group:5s} — RMSE modèle={rmse_m:.4f} | baseline={rmse_b:.4f} | {imp:+.1f}% | MAE modèle={mae_m:.4f} | baseline={mae_b:.4f}")
+    print(f"  {group:5s} — RMSE modèle={rmse_m:.4f} | baseline={rmse_b:.4f} | {imp:+.1f}% | "
+          f"MAE modèle={mae_m:.4f} | baseline={mae_b:.4f}")
 
 # ── Métriques par tranche de 3h ───────────────────────────────────
 # Granularité fine pour localiser précisément où sont les gains/pertes.
@@ -528,8 +587,8 @@ for group, steps in [("NUIT", NIGHT_STEPS), ("JOUR", DAY_STEPS)]:
 # Puis on agrège par mois pour voir si le biais a une saisonnalité,
 # ce qui signalerait un problème structurel de modélisation PV.
 #
-# on veut toujours diagnostiquer les heures à fort PV, pas les heures
-# que le modèle considère comme "JOUR".
+# On cible toujours les heures à fort PV (10h-17h), pas les heures
+# que le modèle considère comme "JOUR" via NIGHT_STEPS/DAY_STEPS.
 #
 # Interprétation du signe :
 #   biais > 0 : réel > prédit → prédit trop bas → modèle surestime le PV
@@ -547,7 +606,7 @@ for i, d in enumerate(dates_test_list):
         continue
     y_day = Y_test[i, day_steps]
     p_day = preds_test[i, day_steps]
-    mask = ~np.isnan(y_day)
+    mask = ~np.isnan(y_day) & ~np.isnan(p_day)
     if mask.sum() == 0:
         continue
     # Biais = moyenne des (réel - prédit) sur la tranche diurne
@@ -564,7 +623,7 @@ for month_key in sorted(monthly_bias.keys()):
     if mean_bias > 0.05:
         interp = "→ surestime PV (prédit trop bas)"
     elif mean_bias < -0.05:
-        interp = "→ sous-estime PV- (prédit trop haut)"
+        interp = "→ sous-estime PV (prédit trop haut)"
     else:
         interp = "→ ~neutre"
     print(f"  {month_key:10s} | {n:8d} | {mean_bias:+11.4f} | {interp}")
