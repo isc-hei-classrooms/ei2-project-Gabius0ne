@@ -17,10 +17,15 @@ non-stationnarité du PV due à la croissance du parc Oiken.
   Principe :
     - Pour chaque jour, on récupère pv_normalizer_90j (feature v14)
       calculée comme mean(solar_remote, 10h-17h UTC, 90j précédents)
-    - Pour les DAY_STEPS (indices 40-67, pic PV) : Y_pu = Y / normalizer
+    - On convertit en facteur relatif sans dimension :
+        normalizer_ref = mean(pv_normalizer_90j sur le train set)
+        normalizer_rel = pv_normalizer_90j / normalizer_ref
+      Ce qui donne un facteur ~0.6 (début 2022, petit parc) → ~1.4 (2025,
+      parc agrandi), centré autour de 1.0 = S_base en analogie pu
+    - Pour les DAY_STEPS (indices 40-67, pic PV) : Y_pu = Y / normalizer_rel
     - Pour les NIGHT_STEPS (indices 0-39 et 68-95) : Y_pu = Y (inchangé)
     - Le modèle est entraîné sur Y_pu
-    - À l'inférence, on dénormalise : preds = preds_pu × normalizer
+    - À l'inférence, on dénormalise : preds = preds_pu × normalizer_rel
     - Le RMSE/MAE est calculé dans l'espace dénormalisé, donc
       directement comparable à la baseline Oiken et aux runs précédents
 
@@ -232,30 +237,35 @@ print(f"  Samples retenus : {n_samples} jours")
 print(f"  Features : {X_arr.shape[1]}")
 print(f"  Pas de temps : {n_steps}")
 print(f"  Groupe NUIT (hors pic PV) : {len(NIGHT_STEPS)} pas (00h-09h45 + 17h-23h45) — cible brute")
-print(f"  Groupe JOUR (pic PV)      : {len(DAY_STEPS)} pas (10h00-16h45) — cible normalisée en pu")
-print(f"  Normalizer : stats — min={normalizer_all.min():.3f}, max={normalizer_all.max():.3f}, "
-      f"mean={normalizer_all.mean():.3f}, std={normalizer_all.std():.3f}")
+print(f"  Groupe JOUR (pic PV)      : {len(DAY_STEPS)} pas (10h00-16h45) — cible normalisée en pu relatif")
+print(f"  Normalizer brut (kWh) : min={normalizer_all.min():.1f}, max={normalizer_all.max():.1f}, "
+      f"mean={normalizer_all.mean():.1f}")
 
 # ─────────────────────────────────────────────────────────────────────
-# 1ter. NORMALISATION PER-UNIT DE LA CIBLE SUR DAY_STEPS
+# 1ter. NORMALISATION PER-UNIT RELATIVE DE LA CIBLE SUR DAY_STEPS
 # ─────────────────────────────────────────────────────────────────────
-# Y_pu[i, t] = Y[i, t] / normalizer[i] pour t dans DAY_STEPS
-# Y_pu[i, t] = Y[i, t]                 pour t dans NIGHT_STEPS
+# Le pv_normalizer_90j brut est en kWh (~760 à ~7400), alors que Y est
+# en z-score (~-3 à +3). Diviser Y par ~3400 donnerait des cibles
+# microscopiques (~10⁻⁴) inapprenant pour le modèle.
 #
-# On conserve Y_arr original (brut) pour évaluer les métriques dans
-# l'espace dénormalisé à la fin, et on travaille avec Y_pu pour
-# l'entraînement.
+# Solution : convertir le normalizer en facteur relatif SANS DIMENSION,
+# centré autour de 1.0. On divise chaque normalizer par la moyenne du
+# normalizer sur le TRAIN SET SEUL (anti-leakage : pas de stats test/val).
+#
+# Résultat : normalizer_rel ≈ 0.6 début 2022 (petit parc PV) → 1.4 en
+# 2025 (parc agrandi). La cible Y_pu reste dans le même ordre de grandeur
+# que Y_arr, mais ajustée pour la croissance du parc.
+#
+# Analogie pu exacte : normalizer_ref = S_base, normalizer_rel = S / S_base.
+# Y_pu = Y / (S / S_base) = Y × (S_base / S).
+#
+# Y_pu[i, t] = Y[i, t] / normalizer_rel[i] pour t dans DAY_STEPS
+# Y_pu[i, t] = Y[i, t]                      pour t dans NIGHT_STEPS
 
-Y_pu = Y_arr.copy()
-# Division colonne par colonne sur DAY_STEPS uniquement
-for t in DAY_STEPS:
-    Y_pu[:, t] = Y_arr[:, t] / normalizer_all
-
-print(f"\n  Cible normalisée :")
-print(f"    Y_arr[:, DAY_STEPS]  (brut)  — mean={np.nanmean(Y_arr[:, DAY_STEPS]):+.3f}, "
-      f"std={np.nanstd(Y_arr[:, DAY_STEPS]):.3f}")
-print(f"    Y_pu[:,  DAY_STEPS]  (pu)    — mean={np.nanmean(Y_pu[:, DAY_STEPS]):+.5f}, "
-      f"std={np.nanstd(Y_pu[:, DAY_STEPS]):.5f}")
+# NOTE : normalizer_ref est calculé APRÈS le split (section 2) pour
+# utiliser uniquement les données train. On prépare ici le conteneur,
+# la normalisation effective est dans la section 2bis.
+normalizer_all_raw = normalizer_all.copy()   # sauvegarde brute pour log
 
 # ─────────────────────────────────────────────────────────────────────
 # 2. SPLIT TRAIN / VAL / TEST (chronologique strict)
@@ -267,6 +277,32 @@ split_val   = int(n_samples * (TRAIN_RATIO + VAL_RATIO))
 # X identique train/val/test
 X_train, X_val, X_test = X_arr[:split_train], X_arr[split_train:split_val], X_arr[split_val:]
 
+# ─────────────────────────────────────────────────────────────────────
+# 2bis. CALCUL DU NORMALIZER RELATIF + NORMALISATION EFFECTIVE
+# ─────────────────────────────────────────────────────────────────────
+# On calcule la référence (= S_base en pu) sur le TRAIN SEUL pour
+# éviter tout leakage. Le normalizer relatif est sans dimension et
+# centré autour de 1.0.
+
+normalizer_ref = normalizer_all_raw[:split_train].mean()   # S_base, scalaire
+normalizer_rel = normalizer_all_raw / normalizer_ref        # (n_samples,), ~[0.6, 1.4]
+
+print(f"\n  Normalizer relatif (pu) :")
+print(f"    Référence (mean train) : {normalizer_ref:.1f} kWh")
+print(f"    Facteur relatif : min={normalizer_rel.min():.3f}, max={normalizer_rel.max():.3f}, "
+      f"mean={normalizer_rel.mean():.3f}")
+
+# Normalisation effective de Y sur DAY_STEPS
+Y_pu = Y_arr.copy()
+for t in DAY_STEPS:
+    Y_pu[:, t] = Y_arr[:, t] / normalizer_rel
+
+print(f"\n  Cible normalisée :")
+print(f"    Y_arr[:, DAY_STEPS]  (brut)  — mean={np.nanmean(Y_arr[:, DAY_STEPS]):+.4f}, "
+      f"std={np.nanstd(Y_arr[:, DAY_STEPS]):.4f}")
+print(f"    Y_pu[:,  DAY_STEPS]  (pu)    — mean={np.nanmean(Y_pu[:, DAY_STEPS]):+.4f}, "
+      f"std={np.nanstd(Y_pu[:, DAY_STEPS]):.4f}")
+
 # Y_pu pour l'entraînement (cible normalisée sur DAY_STEPS)
 Y_train_pu = Y_pu[:split_train]
 Y_val_pu   = Y_pu[split_train:split_val]
@@ -275,10 +311,10 @@ Y_test_pu  = Y_pu[split_val:]
 # Y_arr (brut) pour les métriques finales dénormalisées
 Y_test = Y_arr[split_val:]
 
-# Normalizer par split (pour dénormaliser les prédictions test)
-normalizer_train = normalizer_all[:split_train]
-normalizer_val   = normalizer_all[split_train:split_val]
-normalizer_test  = normalizer_all[split_val:]
+# Normalizer relatif par split (pour dénormaliser les prédictions test)
+normalizer_rel_train = normalizer_rel[:split_train]
+normalizer_rel_val   = normalizer_rel[split_train:split_val]
+normalizer_rel_test  = normalizer_rel[split_val:]
 
 B_test      = B_arr[split_val:]
 dates_test  = dates[split_val:]
@@ -287,6 +323,7 @@ print(f"\n=== Split chronologique ===")
 print(f"  Train : {split_train} jours ({dates[0]} → {dates[split_train-1]})  [{TRAIN_RATIO*100:.0f}%]")
 print(f"  Val   : {split_val - split_train} jours ({dates[split_train]} → {dates[split_val-1]})  [{VAL_RATIO*100:.0f}%]")
 print(f"  Test  : {n_samples - split_val} jours ({dates[split_val]} → {dates[-1]})  [{(1-TRAIN_RATIO-VAL_RATIO)*100:.0f}%]")
+print(f"  Normalizer relatif test : min={normalizer_rel_test.min():.3f}, max={normalizer_rel_test.max():.3f}")
 
 # Masque d'exclusion des 13-15 sept sur le test
 dates_test_list = dates_test.to_list()
@@ -402,7 +439,7 @@ print(f"  Dénormalisation des prédictions DAY_STEPS appliquée avant calcul de
 # Concaténation train+val pour l'étape 2
 X_trainval         = np.concatenate([X_train, X_val], axis=0)
 Y_trainval_pu      = np.concatenate([Y_train_pu, Y_val_pu], axis=0)
-normalizer_trainval = np.concatenate([normalizer_train, normalizer_val], axis=0)
+normalizer_rel_trainval = np.concatenate([normalizer_rel_train, normalizer_rel_val], axis=0)
 
 night_set = set(NIGHT_STEPS)
 
@@ -475,9 +512,9 @@ for t in range(n_steps):
 
     # ── DÉNORMALISATION pour DAY_STEPS uniquement
     if is_night:
-        pred_denorm = pred_pu                              # déjà en espace brut
+        pred_denorm = pred_pu                                   # déjà en espace brut
     else:
-        pred_denorm = pred_pu * normalizer_test            # retour à l'espace brut
+        pred_denorm = pred_pu * normalizer_rel_test             # retour à l'espace brut
 
     preds_test[:, t] = pred_denorm
 
