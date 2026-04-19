@@ -105,10 +105,10 @@ TRAIN_RATIO = 0.47
 VAL_RATIO   = 0.20
 
 # Hyperparamètres d'entraînement
-N_OPTUNA_TRIALS  = 400
+N_OPTUNA_TRIALS  = 40
 N_ESTIMATORS_MAX = 1000
 EARLY_STOPPING   = 50
-RANDOM_SEED      = 24
+RANDOM_SEED      = 42
 
 EXCLUDE_DATES = {date(2025, 9, 13), date(2025, 9, 14), date(2025, 9, 15), date(2025, 9, 16)}
 
@@ -118,11 +118,11 @@ EXCLUDE_DATES = {date(2025, 9, 13), date(2025, 9, 14), date(2025, 9, 15), date(2
 # step 0 = 00h00, step 40 = 10h00, step 68 = 17h00, step 95 = 23h45 UTC.
 # DAY_STEPS = indices normalisés en per-unit par pv_normalizer_90j.
 # NIGHT_STEPS = indices laissés bruts (pas de sens physique à normaliser).
-NIGHT_STEPS = list(range(0, 40)) + list(range(68, 96))   # 00h-09h45 + 17h-23h45
-DAY_STEPS   = list(range(40, 68))                         # 10h-16h45
+NIGHT_STEPS = list(range(0, 40)) + list(range(41, 96))   # 00h-09h45 + 17h-23h45
+DAY_STEPS   = list(range(40, 41))                         # 10h-16h45
 
-OPTUNA_STEPS_DAY   = [48, 52, 54, 56, 58]
-OPTUNA_STEPS_NIGHT = [0, 12, 28, 72, 84, 92]
+OPTUNA_STEPS_DAY   = [41]
+OPTUNA_STEPS_NIGHT = [0, 12, 28, 48, 52, 54, 56, 58, 72, 84, 92]
 
 
 # ─────────────────────────────────────────────────────────────────────
