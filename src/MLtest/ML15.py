@@ -1,21 +1,21 @@
 """
-train_lgbm_v14.py
+train_lgbm_v15.py
 =================
-Entraînement LightGBM v14 avec normalisation per-unit de la cible diurne.
+Entraînement LightGBM v15 avec normalisation per-unit de la cible diurne.
 
 OBJECTIF
 --------
 Prédire la charge nette normalisée d'Oiken pour les 96 pas de 15 min
-du jour J+1, à partir des features v14 (v13 + feature pv_normalizer_90j).
+du jour J+1, à partir des features v15 (v13 + feature pv_normalizer_90j).
 
-CHANGEMENT v13 → v14
+CHANGEMENT v13 → v15
 --------------------
 Application d'une normalisation per-unit (analogue au pu en
 électrotechnique) sur la cible DAY_STEPS uniquement, pour traiter la
 non-stationnarité du PV due à la croissance du parc Oiken.
 
   Principe :
-    - Pour chaque jour, on récupère pv_normalizer_90j (feature v14)
+    - Pour chaque jour, on récupère pv_normalizer_90j (feature v15)
       calculée comme mean(solar_remote, 10h-17h UTC, 90j précédents)
     - On convertit en facteur relatif sans dimension :
         normalizer_ref = mean(pv_normalizer_90j sur le train set)
@@ -42,7 +42,7 @@ non-stationnarité du PV due à la croissance du parc Oiken.
     - Choix cohérent avec la règle "fenêtre glissante finissant à J-2"
 
   Anti-leakage :
-    - pv_normalizer_90j est calculé par pipeline_features_v14 avec une
+    - pv_normalizer_90j est calculé par pipeline_features_v15 avec une
       fenêtre finissant strictement à J-2 (aucune donnée ≥ J-1 touchée)
     - Même normalizer utilisé à l'entraînement et à l'inférence pour
       chaque jour, donc aucune fuite temporelle
@@ -60,17 +60,17 @@ STRATÉGIE D'ÉVALUATION
 - Entraînement final en deux étapes :
     1) ES propre sur train seul + val pour déterminer best_iteration
     2) Réentraînement sur train ∪ val avec num_boost_round = best_iteration
-- Exclusion des 13-15 septembre 2025 des métriques finales
+- Exclusion des 13-16 septembre 2025 des métriques finales
 - Jours sans pv_normalizer_90j exclus de tout (train/val/test)
 - Métriques finales TOUJOURS calculées dans l'espace original (dénormalisé)
 
 SORTIES
 -------
-  DATA/models14v0/lgbm_t{000..095}.pkl     — 96 modèles sérialisés (espace pu pour DAY, brut pour NIGHT)
-  DATA/models14v0/metrics.parquet          — RMSE/MAE par pas de temps (espace dénormalisé)
-  DATA/models14v0/predictions_test.parquet — prédictions sur le test set (espace dénormalisé)
-  DATA/models14v0/best_params_night.json   — hyperparamètres NUIT+HORS-PIC
-  DATA/models14v0/best_params_day.json     — hyperparamètres JOUR (pic PV, entraîné en pu)
+  DATA/models15v0/lgbm_t{000..095}.pkl     — 96 modèles sérialisés (espace pu pour DAY, brut pour NIGHT)
+  DATA/models15v0/metrics.parquet          — RMSE/MAE par pas de temps (espace dénormalisé)
+  DATA/models15v0/predictions_test.parquet — prédictions sur le test set (espace dénormalisé)
+  DATA/models15v0/best_params_night.json   — hyperparamètres NUIT+HORS-PIC
+  DATA/models15v0/best_params_day.json     — hyperparamètres JOUR (pic PV, entraîné en pu)
 """
 
 import polars as pl
@@ -91,13 +91,13 @@ from optuna.samplers import TPESampler
 
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_features_v14.parquet"   # features v14
-Y_PATH = BASE / "processed" / "Y_target_v14.parquet"     # cible load net normalisé (96 pas)
-B_PATH = BASE / "processed" / "B_baseline_v14.parquet"   # baseline Oiken pour comparaison
-OUT    = BASE / "models14v0"
+X_PATH = BASE / "processed" / "X_features_v15.parquet"   # features v15
+Y_PATH = BASE / "processed" / "Y_target_v15.parquet"     # cible load net normalisé (96 pas)
+B_PATH = BASE / "processed" / "B_baseline_v15.parquet"   # baseline Oiken pour comparaison
+OUT    = BASE / "models15v0"
 OUT.mkdir(parents=True, exist_ok=True)
 
-# Nom de la colonne contenant le normalizer dans X (créée par pipeline_features_v14)
+# Nom de la colonne contenant le normalizer dans X (créée par pipeline_features_v15)
 NORMALIZER_COL = "pv_normalizer_90j"
 
 # Split chronologique strict
@@ -191,7 +191,7 @@ def print_grouped_importance(feat_names, models, group_name, top_n=20):
 # 1. CHARGEMENT DES DONNÉES
 # ─────────────────────────────────────────────────────────────────────
 
-print("=== Chargement des données v14 ===")
+print("=== Chargement des données v15 ===")
 X = pl.read_parquet(X_PATH)
 Y = pl.read_parquet(Y_PATH)
 B = pl.read_parquet(B_PATH)
@@ -199,8 +199,8 @@ B = pl.read_parquet(B_PATH)
 # Vérification : la colonne normalizer doit être présente
 if NORMALIZER_COL not in X.columns:
     raise ValueError(
-        f"Colonne '{NORMALIZER_COL}' absente de X_features_v14.parquet. "
-        f"As-tu bien régénéré les features avec pipeline_features_v14.py ?"
+        f"Colonne '{NORMALIZER_COL}' absente de X_features_v15.parquet. "
+        f"As-tu bien régénéré les features avec pipeline_features_v15.py ?"
     )
 
 # ─────────────────────────────────────────────────────────────────────
@@ -325,7 +325,7 @@ print(f"  Val   : {split_val - split_train} jours ({dates[split_train]} → {dat
 print(f"  Test  : {n_samples - split_val} jours ({dates[split_val]} → {dates[-1]})  [{(1-TRAIN_RATIO-VAL_RATIO)*100:.0f}%]")
 print(f"  Normalizer relatif test : min={normalizer_rel_test.min():.3f}, max={normalizer_rel_test.max():.3f}")
 
-# Masque d'exclusion des 13-17 sept sur le test
+# Masque d'exclusion des 13-16 sept sur le test
 dates_test_list = dates_test.to_list()
 exclude_mask = np.array([
     d not in EXCLUDE_DATES for d in dates_test_list
@@ -569,7 +569,7 @@ mask_b_all = ~np.isnan(Y_test) & ~np.isnan(B_test) & exclude_mask[:, None]
 rmse_base = float(np.sqrt(mean_squared_error(Y_test[mask_b_all], B_test[mask_b_all])))
 mae_base  = float(mean_absolute_error(Y_test[mask_b_all], B_test[mask_b_all]))
 
-print(f"\n=== Résultats globaux v14 (excl. 13-16 sept) ===")
+print(f"\n=== Résultats globaux v15 (excl. 13-16 sept) ===")
 print(f"  Test set : {exclude_mask.sum()} jours (exclu {n_excluded})")
 print(f"  Modèle   — RMSE : {rmse_global:.4f} | MAE : {mae_global:.4f}")
 print(f"  Baseline — RMSE : {rmse_base:.4f} | MAE : {mae_base:.4f}")

@@ -81,7 +81,7 @@ RANDOM_SEED      = 24     # reproductibilité du sampler Optuna
 
 # Jours où la baseline Oiken a des valeurs aberrantes (trou de données dans leur système)
 # Exclus UNIQUEMENT des métriques finales, pas de l'entraînement
-EXCLUDE_DATES = {date(2025, 9, 13), date(2025, 9, 14), date(2025, 9, 15)}
+EXCLUDE_DATES = {date(2025, 9, 13), date(2025, 9, 14), date(2025, 9, 15), date(2025, 9, 16,)}
 
 # ─────────────────────────────────────────────────────────────────────
 # GROUPES JOUR / NUIT
@@ -247,7 +247,7 @@ print(f"  Train : {split_train} jours ({dates[0]} → {dates[split_train-1]})  [
 print(f"  Val   : {split_val - split_train} jours ({dates[split_train]} → {dates[split_val-1]})  [{VAL_RATIO*100:.0f}%]")
 print(f"  Test  : {n_samples - split_val} jours ({dates[split_val]} → {dates[-1]})  [{(1-TRAIN_RATIO-VAL_RATIO)*100:.0f}%]")
 
-# Masque booléen pour exclure les 13-15 septembre des métriques finales.
+# Masque booléen pour exclure les 13-16 septembre des métriques finales.
 # Ces 3 jours sont gardés dans le test set mais ne comptent pas dans
 # le calcul des RMSE/MAE : la baseline Oiken y est aberrante.
 dates_test_list = dates_test.to_list()
@@ -523,7 +523,7 @@ mask_b_all = ~np.isnan(Y_test) & ~np.isnan(B_test) & exclude_mask[:, None]
 rmse_base = float(np.sqrt(mean_squared_error(Y_test[mask_b_all], B_test[mask_b_all])))
 mae_base  = float(mean_absolute_error(Y_test[mask_b_all], B_test[mask_b_all]))
 
-print(f"\n=== Résultats globaux (excl. 13-15 sept) ===")
+print(f"\n=== Résultats globaux (excl. 13-16 sept) ===")
 print(f"  Test set : {exclude_mask.sum()} jours (exclu {n_excluded})")
 print(f"  Modèle   — RMSE : {rmse_global:.4f} | MAE : {mae_global:.4f}")
 print(f"  Baseline — RMSE : {rmse_base:.4f} | MAE : {mae_base:.4f}")
