@@ -91,10 +91,10 @@ from optuna.samplers import TPESampler
 
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_features_v14.parquet"   # features v15
-Y_PATH = BASE / "processed" / "Y_target_v14.parquet"     # cible load net normalisé (96 pas)
-B_PATH = BASE / "processed" / "B_baseline_v14.parquet"   # baseline Oiken pour comparaison
-OUT    = BASE / "models15v1"
+X_PATH = BASE / "processed" / "X_features_v15.parquet"   # features v15
+Y_PATH = BASE / "processed" / "Y_target_v15.parquet"     # cible load net normalisé (96 pas)
+B_PATH = BASE / "processed" / "B_baseline_v15.parquet"   # baseline Oiken pour comparaison
+OUT    = BASE / "models15v2"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Nom de la colonne contenant le normalizer dans X (créée par pipeline_features_v15)
@@ -105,7 +105,7 @@ TRAIN_RATIO = 0.47
 VAL_RATIO   = 0.20
 
 # Hyperparamètres d'entraînement
-N_OPTUNA_TRIALS  = 100
+N_OPTUNA_TRIALS  = 50
 N_ESTIMATORS_MAX = 1000
 EARLY_STOPPING   = 50
 RANDOM_SEED      = 4382

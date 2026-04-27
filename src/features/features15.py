@@ -538,7 +538,7 @@ def compute_pv_yield_ratios(
         )
         diurnal_vals = diurnal["solar_remote"].drop_nulls()
         if len(diurnal_vals) > 0:
-            features["pv_normalizer_90j"] = float(diurnal_vals.mean())
+            features["pv_normalizer_90j"] = float(diurnal_vals.max())
         else:
             features["pv_normalizer_90j"] = None
     else:
