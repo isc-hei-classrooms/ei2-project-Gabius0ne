@@ -1,10 +1,10 @@
 """
-pipeline_recup_v5.py
+pipeline_recupGOLDEN.py
 Récupération des données MeteoSuisse depuis InfluxDB.
 - Mesures réelles    : toutes variables, 6 stations
 - Prévisions         : toutes variables, 6 stations, horizons 0h à 36h
 - Colonnes nommées   : {variable}_{station} et pred_{variable}_h{horizon}_{station}
-Résultat : meteo_multistation_v5.parquet
+Résultat : meteo_multistationGOLDEN.parquet
 """
 
 
@@ -21,7 +21,7 @@ TOKEN  = "ixOI8jiwG1nn6a2MaE1pGa8XCiIJ2rqEX6ZCnluhwAyeZcrT6FHoDgnQhNy5k0YmVrk7hZ
 ORG    = "HESSOVS"
 BUCKET = "MeteoSuisse"
 START  = "2022-10-01T00:00:00Z"
-STOP   = "2025-10-01T00:00:00Z"
+STOP   = "2026-04-22T00:00:00Z"
 
 
 OUTPUT = Path(".")
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     merged = merged.sort("timestamp")
 
     # Écriture du fichier parquet final
-    out = OUTPUT / "meteo_multistation_v4.parquet"
+    out = OUTPUT / "meteo_multistationGOLDEN.parquet"
     merged.write_parquet(out)
 
     # ── Résumé de l'export ──
