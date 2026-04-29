@@ -65,6 +65,11 @@
   .top-bar h1 span { color: var(--ml); }
   .reset-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--dim); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 0.76rem; transition: all 0.2s; }
   .reset-btn:hover { color: var(--text); border-color: var(--bad); }
+  .link-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--dim); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 0.76rem; transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .link-btn:hover { color: var(--text); border-color: var(--ml); background: #151f30; }
+  .top-bar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .drop-link { margin-top: 12px; font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: var(--dim); text-decoration: none; transition: color 0.2s; }
+  .drop-link:hover { color: var(--ml); }
 
   /* ── GLOBAL STATS BAR ── */
   .global-stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; padding: 10px 14px; background: #141c28; border: 1px solid #263044; border-radius: 10px; max-width: 1100px; margin: 0 auto 12px; }
@@ -85,6 +90,9 @@
   .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; max-width: 1100px; margin: 0 auto 12px; }
   .legend-row { display: flex; justify-content: center; gap: 20px; margin-bottom: 6px; font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace; }
   .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-toggle { cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: opacity 0.15s, background 0.15s; user-select: none; }
+  .legend-toggle:hover { background: var(--surface2); }
+  .legend-toggle.off { opacity: 0.35; }
   .legend-line { width: 18px; height: 0; border-top: 2.5px solid; }
   .legend-line.dashed { border-top-style: dashed; }
 
@@ -188,6 +196,8 @@ for d in common:
 pd.DataFrame(rows).to_csv('forecast_data.csv', index=False)</pre>
     </div>
   </details>
+
+  <a href="features.html" class="drop-link" target="_blank" rel="noopener">📖 Voir la documentation des features →</a>
 </div>
   
 
@@ -195,7 +205,10 @@ pd.DataFrame(rows).to_csv('forecast_data.csv', index=False)</pre>
 <div id="chartScreen" class="hidden">
   <div class="top-bar">
     <h1>Oiken Forecast <span>·</span> ML vs Baseline</h1>
-    <button class="reset-btn" id="resetBtn">↩ Nouveau fichier</button>
+    <div class="top-bar-actions">
+      <a href="features.html" class="link-btn" target="_blank" rel="noopener">📖 Doc features</a>
+      <button class="reset-btn" id="resetBtn">↩ Nouveau fichier</button>
+    </div>
   </div>
   <div class="global-stats" id="globalStats"></div>
   <div class="controls">
@@ -206,9 +219,10 @@ pd.DataFrame(rows).to_csv('forecast_data.csv', index=False)</pre>
   <div class="date-info" id="dateInfo"></div>
   <div class="chart-wrap">
     <div class="legend-row">
-      <div class="legend-item"><div class="legend-line" style="border-color:var(--real)"></div> Réel</div>
-      <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--ml)"></div> ML</div>
-      <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--base)"></div> Baseline</div>
+      <div class="legend-item legend-toggle" data-ds="0"><div class="legend-line" style="border-color:var(--real)"></div> Réel</div>
+      <div class="legend-item legend-toggle" data-ds="1"><div class="legend-line dashed" style="border-color:var(--ml)"></div> ML</div>
+      <div class="legend-item legend-toggle" data-ds="2"><div class="legend-line dashed" style="border-color:var(--base)"></div> Baseline</div>
+      <div class="legend-item legend-toggle off" data-ds="3"><div class="legend-line" style="border-color:#f1c40f"></div> Irradiance</div>
     </div>
     <canvas id="chart"></canvas>
   </div>
@@ -244,11 +258,12 @@ function parseCSV(text) {
   const headers = lines[0].split(',').map(h => h.trim());
   const dateIdx = headers.findIndex(h => h.toLowerCase() === 'date');
   if (dateIdx === -1) throw new Error('"date" introuvable');
-  const lC = [], pC = [], bC = [];
+  const lC = [], pC = [], bC = [], iC = [];
   for (let i = 0; i < headers.length; i++) {
     if (/^l\d{3}$/.test(headers[i])) lC.push(i);
     else if (/^p\d{3}$/.test(headers[i])) pC.push(i);
     else if (/^b\d{3}$/.test(headers[i])) bC.push(i);
+    else if (/^i\d{3}$/.test(headers[i])) iC.push(i);
   }
   if (!lC.length || !pC.length || !bC.length) throw new Error('Colonnes l/p/b introuvables');
   const data = {};
@@ -261,6 +276,7 @@ function parseCSV(text) {
       l: lC.map(i => { const x = parseFloat(v[i]); return isNaN(x) ? null : x; }),
       p: pC.map(i => { const x = parseFloat(v[i]); return isNaN(x) ? null : x; }),
       b: bC.map(i => { const x = parseFloat(v[i]); return isNaN(x) ? null : x; }),
+      i: iC.length ? iC.map(j => { const x = parseFloat(v[j]); return isNaN(x) ? null : x; }) : null,
     };
   }
   return data;
@@ -561,9 +577,10 @@ function initChart() {
     data: {
       labels: timeLabels,
       datasets: [
-        { label: 'Réel', data: [], borderColor: '#e6edf3', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.3, order: 1 },
-        { label: 'ML', data: [], borderColor: '#58a6ff', borderWidth: 2, pointRadius: 0, borderDash: [6,3], fill: false, tension: 0.3, order: 2 },
-        { label: 'Baseline', data: [], borderColor: '#f0883e', borderWidth: 1.5, pointRadius: 0, borderDash: [3,3], fill: false, tension: 0, order: 3 }
+        { label: 'Réel', data: [], borderColor: '#e6edf3', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.3, order: 1, yAxisID: 'y' },
+        { label: 'ML', data: [], borderColor: '#58a6ff', borderWidth: 2, pointRadius: 0, borderDash: [6,3], fill: false, tension: 0.3, order: 2, yAxisID: 'y' },
+        { label: 'Baseline', data: [], borderColor: '#f0883e', borderWidth: 1.5, pointRadius: 0, borderDash: [3,3], fill: false, tension: 0, order: 3, yAxisID: 'y' },
+        { label: 'Irradiance', data: [], borderColor: '#f1c40f', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3, order: 4, yAxisID: 'y1', hidden: true }
       ]
     },
     options: {
@@ -579,14 +596,20 @@ function initChart() {
           padding: 10,
           callbacks: {
             title: items => document.getElementById('datePicker').value + ' ' + items[0].label,
-            label: c => ' ' + c.dataset.label + ': ' + (c.parsed.y !== null ? c.parsed.y.toFixed(1) + ' MW' : 'N/A')
+            label: c => {
+              if (c.parsed.y === null) return ' ' + c.dataset.label + ': N/A';
+              const unit = c.dataset.yAxisID === 'y1' ? ' W/m²' : ' MW';
+              return ' ' + c.dataset.label + ': ' + c.parsed.y.toFixed(1) + unit;
+            }
           }
         }
       },
       scales: {
         x: { grid: { color: 'rgba(84,97,120,0.12)' }, ticks: { color: '#546178', font: { family: 'IBM Plex Mono', size: 10 }, maxTicksLimit: 12, maxRotation: 0 } },
-        y: { grid: { color: 'rgba(84,97,120,0.12)' }, ticks: { color: '#546178', font: { family: 'IBM Plex Mono', size: 10 }, callback: function(value) { return value.toFixed(0); } },
-          title: { display: true, text: 'Charge (MW)', color: '#546178', font: { family: 'DM Sans', size: 12 } } }
+        y: { position: 'left', grid: { color: 'rgba(84,97,120,0.12)' }, ticks: { color: '#546178', font: { family: 'IBM Plex Mono', size: 10 }, callback: function(value) { return value.toFixed(0); } },
+          title: { display: true, text: 'Charge (MW)', color: '#546178', font: { family: 'DM Sans', size: 12 } } },
+        y1: { position: 'right', display: false, grid: { drawOnChartArea: false }, min: 0, max: 1100, ticks: { color: '#f1c40f', font: { family: 'IBM Plex Mono', size: 10 }, callback: function(value) { return value.toFixed(0); } },
+          title: { display: true, text: 'Irradiance (W/m²)', color: '#f1c40f', font: { family: 'DM Sans', size: 12 } } }
       }
     }
   });
@@ -598,6 +621,7 @@ function updateChart(date) {
   chart.data.datasets[0].data = denorm(d.l);
   chart.data.datasets[1].data = denorm(d.p);
   chart.data.datasets[2].data = denorm(d.b);
+  chart.data.datasets[3].data = d.i ? d.i.slice() : [];
   chart.update();
   const idx = sortedDates.indexOf(date);
   const dt = new Date(date + 'T00:00:00');
@@ -608,6 +632,23 @@ function updateChart(date) {
   const cell = document.querySelector(`#heatmapWrap .hm-cell[data-date="${date}"]`);
   if (cell) cell.classList.add('selected');
 }
+
+// ── Toggle datasets via légende ──
+document.querySelectorAll('.legend-toggle').forEach(el => {
+  el.addEventListener('click', function() {
+    if (!chart) return;
+    const idx = parseInt(this.dataset.ds, 10);
+    const ds = chart.data.datasets[idx];
+    if (!ds) return;
+    ds.hidden = !ds.hidden;
+    this.classList.toggle('off', ds.hidden);
+    // Pour l'irradiance (dataset 3, axe y1), on cache aussi l'axe droit
+    if (idx === 3) {
+      chart.options.scales.y1.display = !ds.hidden;
+    }
+    chart.update();
+  });
+});
 
 // ── Drop zone & sélecteur CSV ──
 const dropZone = document.getElementById('dropZone');

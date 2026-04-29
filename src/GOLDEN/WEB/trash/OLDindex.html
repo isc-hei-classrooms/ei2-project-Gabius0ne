@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oiken Load Forecast Viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #06090f;
+    --surface: #0d1117;
+    --surface2: #151b27;
+    --border: #1c2333;
+    --text: #c9d1d9;
+    --dim: #546178;
+    --real: #e6edf3;
+    --ml: #58a6ff;
+    --base: #f0883e;
+    --good: #3fb950;
+    --bad: #f85149;
+    --warn: #d29922;
+    --purple: #800080;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── DROP SCREEN ── */
+  #dropScreen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; }
+  #dropScreen.hidden, #chartScreen.hidden { display: none; }
+  .title { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 6px; }
+  .title span { background: linear-gradient(135deg, var(--ml), var(--base)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { color: var(--dim); font-size: 0.88rem; font-family: 'IBM Plex Mono', monospace; margin-bottom: 32px; }
+  .drop-zone { width: 420px; max-width: 90vw; height: 200px; border: 2px dashed var(--border); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; cursor: pointer; transition: all 0.25s; background: var(--surface); }
+  .drop-zone:hover, .drop-zone.dragover { border-color: var(--ml); background: #1a2740; transform: translateY(-2px); }
+  .drop-zone.loaded { border-color: var(--good); border-style: solid; background: #0d2818; }
+  .drop-zone .icon { font-size: 2.4rem; opacity: 0.6; }
+  .drop-zone:hover .icon, .drop-zone.loaded .icon { opacity: 1; }
+  .drop-zone .label { font-weight: 600; font-size: 1.05rem; }
+  .drop-zone .hint { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--dim); }
+  .drop-zone .status { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: var(--good); min-height: 1.2em; }
+  .drop-zone input[type="file"] { display: none; }
+  .go-btn { margin-top: 28px; padding: 12px 36px; background: linear-gradient(135deg, var(--ml), #3d8bfd); color: #fff; border: none; border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 1rem; font-weight: 600; cursor: pointer; opacity: 0.3; pointer-events: none; transition: all 0.3s; }
+  .go-btn.ready { opacity: 1; pointer-events: auto; }
+  .go-btn.ready:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(88,166,255,0.25); }
+  details.info { margin-top: 24px; max-width: 500px; }
+  details.info summary { font-size: 0.82rem; color: var(--dim); cursor: pointer; font-family: 'IBM Plex Mono', monospace; }
+  details.info .content { margin-top: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; font-size: 0.78rem; color: var(--dim); line-height: 1.7; font-family: 'IBM Plex Mono', monospace; }
+  details.info pre { background: var(--surface2); padding: 10px 12px; border-radius: 6px; margin-top: 8px; overflow-x: auto; font-size: 0.74rem; line-height: 1.5; }
+/* ── CSV SELECTOR ── */
+  .csv-selector { width: 420px; max-width: 90vw; margin-bottom: 14px; }
+  .csv-selector label { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--dim); margin-bottom: 6px; }
+  .csv-selector select { width: 100%; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 0.92rem; cursor: pointer; transition: all 0.2s; }
+  .csv-selector select:hover { border-color: var(--ml); }
+  .csv-selector select:focus { outline: none; border-color: var(--ml); box-shadow: 0 0 0 3px rgba(88,166,255,0.15); }
+  .csv-selector.hidden { display: none; }
+  .or-divider { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--dim); margin: 14px 0; letter-spacing: 2px; }
+  /* ── CHART SCREEN ── */
+  #chartScreen { padding: 16px 20px; }
+  .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
+  .top-bar h1 { font-size: 1.1rem; font-weight: 600; }
+  .top-bar h1 span { color: var(--ml); }
+  .reset-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--dim); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 0.76rem; transition: all 0.2s; }
+  .reset-btn:hover { color: var(--text); border-color: var(--bad); }
+
+  /* ── GLOBAL STATS BAR ── */
+  .global-stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; padding: 10px 14px; background: #141c28; border: 1px solid #263044; border-radius: 10px; max-width: 1100px; margin: 0 auto 12px; }
+  .gstat { text-align: center; padding: 4px 14px; border-right: 1px solid var(--border); }
+  .gstat:last-child { border-right: none; }
+  .gstat .gl { font-size: 0.6rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; font-family: 'IBM Plex Mono', monospace; }
+  .gstat .gv { font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; font-weight: 600; margin-top: 1px; }
+
+  /* ── CONTROLS ── */
+  .controls { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+  .nav-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--dim); padding: 7px 14px; border-radius: 7px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; transition: all 0.15s; }
+  .nav-btn:hover { color: var(--text); border-color: var(--ml); background: #151f30; }
+  input[type="date"] { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 7px 12px; border-radius: 7px; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; outline: none; }
+  input[type="date"]:focus { border-color: var(--ml); }
+  .date-info { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--dim); text-align: center; margin-bottom: 10px; }
+
+  /* ── CHART ── */
+  .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; max-width: 1100px; margin: 0 auto 12px; }
+  .legend-row { display: flex; justify-content: center; gap: 20px; margin-bottom: 6px; font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-line { width: 18px; height: 0; border-top: 2.5px solid; }
+  .legend-line.dashed { border-top-style: dashed; }
+
+  /* ── DAY METRICS ── */
+  .day-metrics { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; max-width: 1100px; margin: 0 auto 16px; }
+  .dm-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; text-align: center; min-width: 110px; }
+  .metric .lbl { font-size: 0.6rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; font-family: 'IBM Plex Mono', monospace; }
+  .metric .val { font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; font-weight: 600; }
+  .metric .sub { font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: var(--dim); margin-top: 1px; }
+  .ml-c { color: var(--ml); }
+  .base-c { color: var(--base); }
+  .good-c { color: var(--good); }
+  .bad-c { color: var(--bad); }
+  .warn-c { color: var(--warn); }
+
+  /* ── HEATMAP ── */
+  .heatmap-section { max-width: 1100px; margin: 0 auto; }
+  .heatmap-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+  .heatmap-legend { font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: var(--dim); display: flex; align-items: center; gap: 4px; }
+  .hleg-bar { width: 100px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #b33a3a, #3a2020 30%, #1a1a2a 50%, #1a3020 70%, #3ab33a); }
+  .hleg-warn { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--warn); border-radius: 3px; margin: 0 3px; vertical-align: middle; }
+
+  .heatmap-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; max-height: 360px; overflow-y: auto; }
+  .heatmap-wrap::-webkit-scrollbar { width: 6px; }
+  .heatmap-wrap::-webkit-scrollbar-track { background: var(--surface); }
+  .heatmap-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .hm-header { display: grid; grid-template-columns: 64px repeat(7, 1fr); gap: 3px; margin-bottom: 4px; position: sticky; top: 0; background: var(--surface); z-index: 2; padding-bottom: 4px; }
+  .hm-header span { text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: var(--dim); font-weight: 500; }
+  .hm-row { display: grid; grid-template-columns: 64px repeat(7, 1fr); gap: 3px; margin-bottom: 3px; }
+  .hm-week-label { font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; color: var(--dim); display: flex; align-items: center; padding-left: 2px; }
+  .hm-cell {
+    aspect-ratio: 1.4; border-radius: 5px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 500;
+    color: rgba(255,255,255,0.6); transition: all 0.12s; position: relative;
+    border: 4px solid transparent; min-height: 36px;
+  }
+  .hm-cell:hover { transform: scale(1.1); z-index: 5; border-color: var(--text); }
+  .hm-cell.selected { border-color: var(--ml); box-shadow: 0 0 8px rgba(88,166,255,0.4); z-index: 4; }
+  .hm-cell.empty { opacity: 0; pointer-events: none; }
+  .hm-cell.baseline-bad { border-color: var(--warn); }
+  .hm-cell.baseline-bad.selected { border-color: var(--ml); box-shadow: 0 0 8px rgba(88,166,255,1), 0 0 0 3px var(--warn); }
+
+  /* ── MONTHLY STATS ── */
+  .monthly-section { max-width: 1100px; margin: 16px auto 0; }
+  .monthly-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; }
+  .monthly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 6px; }
+  .month-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-family: 'IBM Plex Mono', monospace; }
+  .month-card .mc-label { font-size: 0.7rem; color: var(--dim); margin-bottom: 4px; }
+  .month-card .mc-row { font-size: 0.72rem; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<!-- ════════ DROP SCREEN ════════ -->
+<!-- ════════ DROP SCREEN ════════ -->
+<div id="dropScreen">
+  <div class="title">Oiken Forecast <span>Viewer</span></div>
+  <div class="subtitle">Choisis un dataset ou dépose un CSV</div>
+
+  <div class="csv-selector hidden" id="csvSelector">
+    <label>Datasets disponibles</label>
+    <select id="csvSelect"></select>
+  </div>
+
+  <div class="or-divider hidden" id="orDivider">─── OU ───</div>
+
+  <div class="drop-zone" id="dropZone">
+    <div class="icon">📂</div>
+    <div class="label">forecast_data.csv</div>
+    <div class="hint">Glisse ou clique pour sélectionner</div>
+    <div class="status" id="dropStatus"></div>
+    <input type="file" accept=".csv" id="fileInput">
+  </div>
+
+  <button class="go-btn" id="goBtn">Visualiser →</button>
+
+  <details class="info">
+    <summary>Comment générer le CSV depuis tes parquets ?</summary>
+    <div class="content">
+      Exécute ce script Python à côté de tes 3 fichiers parquet :
+      <pre>import pandas as pd
+
+preds = pd.read_parquet('predictions_test.parquet').set_index('date')
+base  = pd.read_parquet('B_baseline_v14.parquet').set_index('date')
+real  = pd.read_parquet('Y_target_v14.parquet').set_index('date')
+
+common = sorted(set(preds.index) & set(base.index) & set(real.index))
+rows = []
+for d in common:
+    row = {'date': str(d)}
+    for i in range(96):
+        t = f'{i:03d}'
+        row[f'l{t}'] = round(float(real.loc[d, f'load_t{t}']), 4)
+        row[f'p{t}'] = round(float(preds.loc[d, f'pred_t{t}']), 4)
+        row[f'b{t}'] = round(float(base.loc[d, f'baseline_t{t}']), 4)
+    rows.append(row)
+
+pd.DataFrame(rows).to_csv('forecast_data.csv', index=False)</pre>
+    </div>
+  </details>
+</div>
+  
+
+<!-- ════════ CHART SCREEN ════════ -->
+<div id="chartScreen" class="hidden">
+  <div class="top-bar">
+    <h1>Oiken Forecast <span>·</span> ML vs Baseline</h1>
+    <button class="reset-btn" id="resetBtn">↩ Nouveau fichier</button>
+  </div>
+  <div class="global-stats" id="globalStats"></div>
+  <div class="controls">
+    <button class="nav-btn" id="prevBtn">◀</button>
+    <input type="date" id="datePicker">
+    <button class="nav-btn" id="nextBtn">▶</button>
+  </div>
+  <div class="date-info" id="dateInfo"></div>
+  <div class="chart-wrap">
+    <div class="legend-row">
+      <div class="legend-item"><div class="legend-line" style="border-color:var(--real)"></div> Réel</div>
+      <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--ml)"></div> ML</div>
+      <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--base)"></div> Baseline</div>
+    </div>
+    <canvas id="chart"></canvas>
+  </div>
+  <div class="day-metrics" id="dayMetrics"></div>
+  <div class="heatmap-section">
+    <div class="heatmap-title">
+      Performance journalière
+      <div class="heatmap-legend">
+        <span>ML pire</span> <div class="hleg-bar"></div> <span>ML meilleur</span>
+        <span style="margin-left:10px;"><span class="hleg-warn"></span> Prédiction ratée (top 10%)</span>
+      </div>
+    </div>
+    <div class="heatmap-wrap" id="heatmapWrap"></div>
+  </div>
+  <div class="monthly-section">
+    <div class="monthly-title">Statistiques mensuelles</div>
+    <div class="monthly-grid" id="monthlyGrid"></div>
+  </div>
+</div>
+
+<script>
+const MU = 66.14, SIGMA = 34.46;
+const DAY_START = 32, DAY_END = 80;
+const WEEKDAYS = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const EXCLUDE_DATES = new Set(['2025-09-13', '2025-09-14','2025-09-15','2025-09-16']);
+
+let DATA = {}, sortedDates = [], chart = null, dayStats = {}, baselineP90 = 0;
+
+// ── CSV Parser ──
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) throw new Error('CSV vide');
+  const headers = lines[0].split(',').map(h => h.trim());
+  const dateIdx = headers.findIndex(h => h.toLowerCase() === 'date');
+  if (dateIdx === -1) throw new Error('"date" introuvable');
+  const lC = [], pC = [], bC = [];
+  for (let i = 0; i < headers.length; i++) {
+    if (/^l\d{3}$/.test(headers[i])) lC.push(i);
+    else if (/^p\d{3}$/.test(headers[i])) pC.push(i);
+    else if (/^b\d{3}$/.test(headers[i])) bC.push(i);
+  }
+  if (!lC.length || !pC.length || !bC.length) throw new Error('Colonnes l/p/b introuvables');
+  const data = {};
+  for (let r = 1; r < lines.length; r++) {
+    const v = lines[r].split(',');
+    if (v.length < headers.length) continue;
+    const d = v[dateIdx].trim();
+    if (!d || d.length < 10) continue;
+    data[d] = {
+      l: lC.map(i => { const x = parseFloat(v[i]); return isNaN(x) ? null : x; }),
+      p: pC.map(i => { const x = parseFloat(v[i]); return isNaN(x) ? null : x; }),
+      b: bC.map(i => { const x = parseFloat(v[i]); return isNaN(x) ? null : x; }),
+    };
+  }
+  return data;
+}
+
+// ── Hourly aggregation helper ──
+// Averages 4 quarter-hourly steps into 1 hourly value, returns arrays
+function toHourly(arr, start, end) {
+  const out = [];
+  for (let h = Math.floor(start / 4); h < Math.ceil(end / 4); h++) {
+    let s = 0, n = 0;
+    for (let q = 0; q < 4; q++) {
+      const idx = h * 4 + q;
+      if (idx < start || idx >= end) continue;
+      if (arr[idx] !== null && arr[idx] !== undefined) { s += arr[idx]; n++; }
+    }
+    out.push(n > 0 ? s / n : null);
+  }
+  return out;
+}
+
+function rmseH(real, pred) {
+  let sq = 0, n = 0;
+  for (let i = 0; i < real.length; i++) {
+    if (real[i] === null || pred[i] === null) continue;
+    sq += (real[i] - pred[i]) ** 2; n++;
+  }
+  return n > 0 ? Math.sqrt(sq / n) : null;
+}
+function maeH(real, pred) {
+  let s = 0, n = 0;
+  for (let i = 0; i < real.length; i++) {
+    if (real[i] === null || pred[i] === null) continue;
+    s += Math.abs(real[i] - pred[i]); n++;
+  }
+  return n > 0 ? s / n : null;
+}
+function biasH(real, pred) {
+  let s = 0, n = 0;
+  for (let i = 0; i < real.length; i++) {
+    if (real[i] === null || pred[i] === null) continue;
+    s += (real[i] - pred[i]); n++;
+  }
+  return n > 0 ? s / n : null;
+}
+// 96-step versions
+function rmse96(real, pred, start, end) {
+  let sq = 0, n = 0;
+  for (let i = start; i < end && i < real.length; i++) {
+    if (real[i] === null || pred[i] === null) continue;
+    sq += (real[i] - pred[i]) ** 2; n++;
+  }
+  return n > 0 ? Math.sqrt(sq / n) : null;
+}
+function mae96(real, pred, start, end) {
+  let s = 0, n = 0;
+  for (let i = start; i < end && i < real.length; i++) {
+    if (real[i] === null || pred[i] === null) continue;
+    s += Math.abs(real[i] - pred[i]); n++;
+  }
+  return n > 0 ? s / n : null;
+}
+
+function toMW(norm) { return norm !== null ? (norm * SIGMA).toFixed(1) : '—'; }
+
+// ── Compute all stats (hourly resolution) ──
+function computeAllStats() {
+  dayStats = {};
+  const baseRMSEs = [];
+  for (const d of sortedDates) {
+    const dd = DATA[d], N = dd.l.length;
+    // Hourly arrays
+    const lH = toHourly(dd.l, 0, N), pH = toHourly(dd.p, 0, N), bH = toHourly(dd.b, 0, N);
+    const lD = toHourly(dd.l, DAY_START, DAY_END), pD = toHourly(dd.p, DAY_START, DAY_END), bD = toHourly(dd.b, DAY_START, DAY_END);
+    // Night = concat [0,DAY_START) + [DAY_END,N)
+    const lN1 = toHourly(dd.l, 0, DAY_START), pN1 = toHourly(dd.p, 0, DAY_START), bN1 = toHourly(dd.b, 0, DAY_START);
+    const lN2 = toHourly(dd.l, DAY_END, N), pN2 = toHourly(dd.p, DAY_END, N), bN2 = toHourly(dd.b, DAY_END, N);
+    const lNight = lN1.concat(lN2), pNight = pN1.concat(pN2), bNight = bN1.concat(bN2);
+
+    const s = {
+      rmseML: rmseH(lH, pH), rmseBase: rmseH(lH, bH),
+      maeML: maeH(lH, pH), maeBase: maeH(lH, bH),
+      rmseDayML: rmseH(lD, pD), rmseDayBase: rmseH(lD, bD),
+      maeDayML: maeH(lD, pD), maeDayBase: maeH(lD, bD),
+      rmseNightML: rmseH(lNight, pNight), rmseNightBase: rmseH(lNight, bNight),
+      maeNightML: maeH(lNight, pNight), maeNightBase: maeH(lNight, bNight),
+      biasDay: biasH(lD, pD),
+      biasDayMW: null,
+      // 96-step for reference
+      rmseML96: rmse96(dd.l, dd.p, 0, N),
+      maeML96: mae96(dd.l, dd.p, 0, N),
+    };
+    s.biasDayMW = s.biasDay !== null ? (s.biasDay * SIGMA) : null;
+    s.deltaRel = (s.rmseML !== null && s.rmseBase !== null && s.rmseBase > 0) ? (1 - s.rmseML / s.rmseBase) : 0;
+    dayStats[d] = s;
+    if (s.rmseBase !== null && !EXCLUDE_DATES.has(d)) baseRMSEs.push(s.rmseBase);
+  }
+  baseRMSEs.sort((a, b) => a - b);
+  baselineP90 = baseRMSEs[Math.floor(baseRMSEs.length * 0.9)] || 999;
+}
+
+// ── Global stats bar (hourly, excl. dates) ──
+function renderGlobalStats() {
+  let sqM = 0, sqB = 0, aM = 0, aB = 0, n = 0, wins = 0, total = 0;
+  for (const d of sortedDates) {
+    if (EXCLUDE_DATES.has(d)) continue;
+    const dd = DATA[d], s = dayStats[d];
+    if (!s || s.rmseML === null) continue;
+    const lH = toHourly(dd.l, 0, dd.l.length), pH = toHourly(dd.p, 0, dd.l.length), bH = toHourly(dd.b, 0, dd.l.length);
+    for (let i = 0; i < lH.length; i++) {
+      if (lH[i] === null || pH[i] === null || bH[i] === null) continue;
+      sqM += (lH[i] - pH[i]) ** 2; sqB += (lH[i] - bH[i]) ** 2;
+      aM += Math.abs(lH[i] - pH[i]); aB += Math.abs(lH[i] - bH[i]);
+      n++;
+    }
+    if (s.rmseML < s.rmseBase) wins++;
+    total++;
+  }
+  const gRmseM = n > 0 ? Math.sqrt(sqM / n) : 0, gRmseB = n > 0 ? Math.sqrt(sqB / n) : 0;
+  const gMaeM = n > 0 ? aM / n : 0, gMaeB = n > 0 ? aB / n : 0;
+  const dRmse = gRmseB > 0 ? (1 - gRmseM / gRmseB) * 100 : 0;
+  const dMae = gMaeB > 0 ? (1 - gMaeM / gMaeB) * 100 : 0;
+  const nExcl = [...EXCLUDE_DATES].filter(d => sortedDates.includes(d)).length;
+
+  document.getElementById('globalStats').innerHTML = `
+    <div class="gstat"><div class="gl">RMSE ML</div><div class="gv ml-c">${gRmseM.toFixed(4)}</div></div>
+    <div class="gstat"><div class="gl">RMSE Base</div><div class="gv base-c">${gRmseB.toFixed(4)}</div></div>
+    <div class="gstat"><div class="gl">&Delta; RMSE</div><div class="gv ${dRmse > 0 ? 'good-c' : 'bad-c'}">${dRmse > 0 ? '+' : ''}${dRmse.toFixed(1)}%</div></div>
+    <div class="gstat"><div class="gl">MAE ML</div><div class="gv ml-c">${gMaeM.toFixed(4)}</div></div>
+    <div class="gstat"><div class="gl">MAE Base</div><div class="gv base-c">${gMaeB.toFixed(4)}</div></div>
+    <div class="gstat"><div class="gl">&Delta; MAE</div><div class="gv ${dMae > 0 ? 'good-c' : 'bad-c'}">${dMae > 0 ? '+' : ''}${dMae.toFixed(1)}%</div></div>
+    <div class="gstat"><div class="gl">Meilleur</div><div class="gv">${wins}/${total} <span style="font-size:0.7rem;color:var(--dim)">(${(wins/total*100).toFixed(0)}%)</span></div></div>
+    <div class="gstat" style="border-right:none"><div class="gl">Exclu</div><div class="gv" style="color:var(--dim);font-size:0.75rem">${nExcl}j (13-16 sept)</div></div>
+  `;
+}
+
+// ── Day metrics ──
+function renderDayMetrics(date) {
+  const s = dayStats[date]; if (!s) return;
+  const improv = s.rmseBase > 0 ? (1 - s.rmseML / s.rmseBase) * 100 : 0;
+  const improvDay = s.rmseDayBase > 0 ? (1 - s.rmseDayML / s.rmseDayBase) * 100 : 0;
+  const improvNight = s.rmseNightBase > 0 ? (1 - s.rmseNightML / s.rmseNightBase) * 100 : 0;
+  const improvMaeDay = s.maeDayBase > 0 ? (1 - s.maeDayML / s.maeDayBase) * 100 : 0;
+  const improvMaeNight = s.maeNightBase > 0 ? (1 - s.maeNightML / s.maeNightBase) * 100 : 0;
+
+  document.getElementById('dayMetrics').innerHTML = `
+    <div class="dm-group">
+      <div class="metric"><div class="lbl">RMSE ML</div><div class="val ml-c">${s.rmseML !== null ? s.rmseML.toFixed(4) : '—'}</div><div class="sub">${toMW(s.rmseML)} MW</div></div>
+      <div class="metric"><div class="lbl">RMSE Baseline</div><div class="val base-c">${s.rmseBase !== null ? s.rmseBase.toFixed(4) : '—'}</div><div class="sub">${toMW(s.rmseBase)} MW</div></div>
+      <div class="metric">
+        <div class="lbl">Journalier</div>
+        <div class="val ${improv > 0 ? 'good-c' : 'bad-c'}">${improv > 0 ? '+' : ''}${improv.toFixed(1)}%</div>
+        <div class="sub">RMSE 96p: ${s.rmseML96 !== null ? s.rmseML96.toFixed(4) : '—'}</div>
+        <div class="sub">MAE 96p: ${s.maeML96 !== null ? s.maeML96.toFixed(4) : '—'}</div>
+      </div>
+      <div class="metric"><div class="lbl">MAE ML</div><div class="val ml-c">${s.maeML !== null ? s.maeML.toFixed(4) : '—'}</div><div class="sub">${toMW(s.maeML)} MW</div></div>
+      <div class="metric"><div class="lbl">MAE Baseline</div><div class="val base-c">${s.maeBase !== null ? s.maeBase.toFixed(4) : '—'}</div><div class="sub">${toMW(s.maeBase)} MW</div></div>
+    </div>
+    <div class="dm-group">
+      <div class="metric">
+        <div class="lbl">RMSE Jour 8-20h</div>
+        <div class="val ${improvDay > 0 ? 'good-c' : 'bad-c'}">${s.rmseDayML !== null ? s.rmseDayML.toFixed(4) : '—'}</div>
+        <div class="sub ${improvDay > 0 ? 'good-c' : 'bad-c'}">${improvDay > 0 ? '+' : ''}${improvDay.toFixed(1)}%</div>
+        <div class="sub">MAE: ${s.maeDayML !== null ? s.maeDayML.toFixed(4) : '—'} <span class="${improvMaeDay > 0 ? 'good-c' : 'bad-c'}">${improvMaeDay > 0 ? '+' : ''}${improvMaeDay.toFixed(1)}%</span></div>
+      </div>
+      <div class="metric">
+        <div class="lbl">RMSE Nuit</div>
+        <div class="val ${improvNight > 0 ? 'good-c' : 'bad-c'}">${s.rmseNightML !== null ? s.rmseNightML.toFixed(4) : '—'}</div>
+        <div class="sub ${improvNight > 0 ? 'good-c' : 'bad-c'}">${improvNight > 0 ? '+' : ''}${improvNight.toFixed(1)}%</div>
+        <div class="sub">MAE: ${s.maeNightML !== null ? s.maeNightML.toFixed(4) : '—'} <span class="${improvMaeNight > 0 ? 'good-c' : 'bad-c'}">${improvMaeNight > 0 ? '+' : ''}${improvMaeNight.toFixed(1)}%</span></div>
+      </div>
+      <div class="metric">
+        <div class="lbl">Biais diurne</div>
+        <div class="val ${s.biasDay > 0.05 ? 'warn-c' : s.biasDay < -0.05 ? 'bad-c' : ''}">${s.biasDay !== null ? (s.biasDay > 0 ? '+' : '') + s.biasDay.toFixed(3) : '—'}</div>
+        <div class="sub">${s.biasDayMW !== null ? (s.biasDayMW > 0 ? '+' : '') + s.biasDayMW.toFixed(1) + ' MW' : ''}</div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Heatmap ──
+function deltaToColor(delta) {
+  const d = Math.max(-1, Math.min(1, delta * 3));
+  if (d >= 0) {
+    const t = d;
+    return `rgb(${Math.round(13+(26-13)*(1-t))},${Math.round(25+(58-25)*t)},${Math.round(20+(32-20)*(1-t))})`;
+  } else {
+    const t = -d;
+    return `rgb(${Math.round(26+(179-26)*t)},${Math.round(20+(32-20)*(1-t))},${Math.round(26+(32-26)*(1-t))})`;
+  }
+}
+
+function renderHeatmap(selectedDate) {
+  const wrap = document.getElementById('heatmapWrap');
+  if (!sortedDates.length) return;
+  let html = '<div class="hm-header"><span></span>';
+  for (const wd of WEEKDAYS) html += `<span>${wd}</span>`;
+  html += '</div>';
+
+  const firstDate = new Date(sortedDates[0] + 'T00:00:00');
+  const lastDate = new Date(sortedDates[sortedDates.length - 1] + 'T00:00:00');
+  const dow = firstDate.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const startMonday = new Date(firstDate);
+  startMonday.setDate(startMonday.getDate() + mondayOffset);
+
+  const dateSet = new Set(sortedDates);
+  let current = new Date(startMonday), weekHtml = '', weekNum = 0, firstCellInView = null;
+
+  while (current <= lastDate || current.getDay() !== 1) {
+    const dayOfWeek = current.getDay();
+    const isoDay = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    if (isoDay === 0) {
+      if (weekHtml) html += weekHtml + '</div>';
+      const wLabel = `${String(current.getDate()).padStart(2,'0')}.${String(current.getMonth()+1).padStart(2,'0')}`;
+      weekHtml = `<div class="hm-row"><div class="hm-week-label">${wLabel}</div>`;
+      weekNum++;
+    }
+    const ds = current.getFullYear() + '-' + String(current.getMonth()+1).padStart(2,'0') + '-' + String(current.getDate()).padStart(2,'0');
+    if (dateSet.has(ds)) {
+      const s = dayStats[ds] || {};
+      const delta = s.deltaRel || 0;
+      const bg = deltaToColor(delta);
+      const sel = ds === selectedDate ? ' selected' : '';
+      const pct = (delta * 100).toFixed(0);
+      const isBad = (s.rmseBase !== null && s.rmseBase >= baselineP90);
+      const badClass = isBad ? ' baseline-bad' : '';
+      weekHtml += `<div class="hm-cell${sel}${badClass}" data-date="${ds}" style="background:${bg}" title="${ds}: ${pct > 0 ? '+' : ''}${pct}%${isBad ? ' | Prédiction ratée' : ''}">${current.getDate()}</div>`;
+      if (ds === selectedDate && firstCellInView === null) firstCellInView = weekNum;
+    } else {
+      weekHtml += '<div class="hm-cell empty"></div>';
+    }
+    current.setDate(current.getDate() + 1);
+    if (current > lastDate && isoDay === 6) break;
+  }
+  if (weekHtml) html += weekHtml + '</div>';
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('.hm-cell:not(.empty)').forEach(cell => {
+    cell.addEventListener('click', function() {
+      const d = this.dataset.date;
+      document.getElementById('datePicker').value = d;
+      updateChart(d);
+      wrap.querySelectorAll('.hm-cell.selected').forEach(c => c.classList.remove('selected'));
+      this.classList.add('selected');
+    });
+  });
+  if (firstCellInView) {
+    wrap.scrollTop = Math.max(0, (firstCellInView - 3) * 42);
+  }
+}
+
+// ── Monthly stats (hourly, excl. dates) ──
+function renderMonthlyStats() {
+  const months = {};
+  for (const d of sortedDates) {
+    if (EXCLUDE_DATES.has(d)) continue;
+    const key = d.slice(0, 7);
+    if (!months[key]) months[key] = { sqM: 0, sqB: 0, aM: 0, aB: 0, n: 0, wins: 0, total: 0 };
+    const m = months[key], dd = DATA[d], s = dayStats[d];
+    const lH = toHourly(dd.l, 0, dd.l.length), pH = toHourly(dd.p, 0, dd.l.length), bH = toHourly(dd.b, 0, dd.l.length);
+    for (let i = 0; i < lH.length; i++) {
+      if (lH[i] === null || pH[i] === null || bH[i] === null) continue;
+      m.sqM += (lH[i] - pH[i]) ** 2; m.sqB += (lH[i] - bH[i]) ** 2;
+      m.aM += Math.abs(lH[i] - pH[i]); m.aB += Math.abs(lH[i] - bH[i]);
+      m.n++;
+    }
+    if (s && s.rmseML !== null && s.rmseML < s.rmseBase) m.wins++;
+    m.total++;
+  }
+  let html = '';
+  for (const key of Object.keys(months).sort()) {
+    const m = months[key];
+    const rM = m.n > 0 ? Math.sqrt(m.sqM / m.n) : 0, rB = m.n > 0 ? Math.sqrt(m.sqB / m.n) : 0;
+    const mM = m.n > 0 ? m.aM / m.n : 0, mB = m.n > 0 ? m.aB / m.n : 0;
+    const dR = rB > 0 ? (1 - rM / rB) * 100 : 0, dM = mB > 0 ? (1 - mM / mB) * 100 : 0;
+    html += `<div class="month-card">
+      <div class="mc-label">${key}</div>
+      <div class="mc-row"><span>RMSE</span><span class="${dR > 0 ? 'good-c' : 'bad-c'}">${dR > 0 ? '+' : ''}${dR.toFixed(1)}%</span></div>
+      <div class="mc-row"><span>MAE</span><span class="${dM > 0 ? 'good-c' : 'bad-c'}">${dM > 0 ? '+' : ''}${dM.toFixed(1)}%</span></div>
+      <div class="mc-row"><span>Meilleur</span><span>${m.wins}/${m.total}</span></div>
+    </div>`;
+  }
+  document.getElementById('monthlyGrid').innerHTML = html;
+}
+
+// ── Chart ──
+const timeLabels = [];
+for (let i = 0; i < 96; i++) {
+  const h = Math.floor(i * 15 / 60), m = (i * 15) % 60;
+  timeLabels.push(String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0'));
+}
+
+function initChart() {
+  const ctx = document.getElementById('chart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: timeLabels,
+      datasets: [
+        { label: 'Réel', data: [], borderColor: '#e6edf3', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.3, order: 1 },
+        { label: 'ML', data: [], borderColor: '#58a6ff', borderWidth: 2, pointRadius: 0, borderDash: [6,3], fill: false, tension: 0.3, order: 2 },
+        { label: 'Baseline', data: [], borderColor: '#f0883e', borderWidth: 1.5, pointRadius: 0, borderDash: [3,3], fill: false, tension: 0, order: 3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true, aspectRatio: 2.2,
+      animation: { duration: 150 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#151b27', borderColor: '#1c2333', borderWidth: 1,
+          titleFont: { family: 'IBM Plex Mono', size: 11 },
+          bodyFont: { family: 'IBM Plex Mono', size: 11 },
+          padding: 10,
+          callbacks: {
+            title: items => document.getElementById('datePicker').value + ' ' + items[0].label,
+            label: c => ' ' + c.dataset.label + ': ' + (c.parsed.y !== null ? c.parsed.y.toFixed(3) : 'N/A')
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: 'rgba(84,97,120,0.12)' }, ticks: { color: '#546178', font: { family: 'IBM Plex Mono', size: 10 }, maxTicksLimit: 12, maxRotation: 0 } },
+        y: { grid: { color: 'rgba(84,97,120,0.12)' }, ticks: { color: '#546178', font: { family: 'IBM Plex Mono', size: 10 } },
+          title: { display: true, text: 'Load (normalisé)', color: '#546178', font: { family: 'DM Sans', size: 12 } } }
+      }
+    }
+  });
+}
+
+function updateChart(date) {
+  const d = DATA[date]; if (!d || !chart) return;
+  chart.data.datasets[0].data = d.l;
+  chart.data.datasets[1].data = d.p;
+  chart.data.datasets[2].data = d.b;
+  chart.update();
+  const idx = sortedDates.indexOf(date);
+  const dt = new Date(date + 'T00:00:00');
+  const dayName = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'][dt.getDay()];
+  document.getElementById('dateInfo').textContent = `${dayName} — Jour ${idx + 1} / ${sortedDates.length}`;
+  renderDayMetrics(date);
+  document.querySelectorAll('#heatmapWrap .hm-cell.selected').forEach(c => c.classList.remove('selected'));
+  const cell = document.querySelector(`#heatmapWrap .hm-cell[data-date="${date}"]`);
+  if (cell) cell.classList.add('selected');
+}
+
+// ── Drop zone & sélecteur CSV ──
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const dropStatus = document.getElementById('dropStatus');
+const goBtn = document.getElementById('goBtn');
+const csvSelector = document.getElementById('csvSelector');
+const csvSelect = document.getElementById('csvSelect');
+const orDivider = document.getElementById('orDivider');
+
+function applyParsedCsv(text, sourceLabel) {
+  try {
+    DATA = parseCSV(text);
+    sortedDates = Object.keys(DATA).sort();
+    if (!sortedDates.length) throw new Error('Aucune date');
+    dropZone.classList.add('loaded');
+    dropStatus.style.color = 'var(--good)';
+    dropStatus.textContent = '✓ ' + (sourceLabel ? sourceLabel + ' · ' : '') + sortedDates.length + ' jours · ' + sortedDates[0] + ' → ' + sortedDates[sortedDates.length-1];
+    goBtn.classList.add('ready');
+  } catch (err) {
+    dropStatus.style.color = 'var(--bad)';
+    dropStatus.textContent = '✗ ' + err.message;
+    goBtn.classList.remove('ready');
+  }
+}
+
+function handleFile(file) {
+  dropStatus.style.color = 'var(--dim)';
+  dropStatus.textContent = '⏳ Lecture...';
+  const reader = new FileReader();
+  reader.onload = e => applyParsedCsv(e.target.result, file.name);
+  reader.readAsText(file);
+}
+
+async function loadCsvFromUrl(url, label) {
+  dropStatus.style.color = 'var(--dim)';
+  dropStatus.textContent = '⏳ Téléchargement...';
+  try {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    applyParsedCsv(text, label);
+  } catch (err) {
+    dropStatus.style.color = 'var(--bad)';
+    dropStatus.textContent = '✗ ' + err.message;
+  }
+}
+
+// Charger le manifeste au démarrage
+(async () => {
+  try {
+    const res = await fetch('manifest.json', { cache: 'no-cache' });
+    if (!res.ok) return;
+    const manifest = await res.json();
+    if (!manifest.files || !manifest.files.length) return;
+
+    csvSelector.classList.remove('hidden');
+    orDivider.classList.remove('hidden');
+
+    let defaultIdx = 0;
+    manifest.files.forEach((f, i) => {
+      const opt = document.createElement('option');
+      opt.value = f.path;
+      opt.textContent = f.name;
+      opt.dataset.label = f.name;
+      if (f.default) defaultIdx = i;
+      csvSelect.appendChild(opt);
+    });
+    csvSelect.selectedIndex = defaultIdx;
+
+    csvSelect.addEventListener('change', () => {
+      const opt = csvSelect.options[csvSelect.selectedIndex];
+      loadCsvFromUrl(opt.value, opt.dataset.label);
+    });
+
+    // Auto-load du fichier par défaut
+    const opt = csvSelect.options[defaultIdx];
+    loadCsvFromUrl(opt.value, opt.dataset.label);
+  } catch (e) {
+    console.warn('manifest.json non disponible, mode drop seul:', e);
+  }
+})();
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+// ── Navigation ──
+goBtn.addEventListener('click', function() {
+  if (!sortedDates.length) return;
+  document.getElementById('dropScreen').classList.add('hidden');
+  document.getElementById('chartScreen').classList.remove('hidden');
+  computeAllStats();
+  const picker = document.getElementById('datePicker');
+  picker.min = sortedDates[0]; picker.max = sortedDates[sortedDates.length-1]; picker.value = sortedDates[0];
+  initChart(); renderGlobalStats(); renderHeatmap(sortedDates[0]); renderMonthlyStats(); updateChart(sortedDates[0]);
+});
+
+document.getElementById('resetBtn').addEventListener('click', function() {
+  document.getElementById('chartScreen').classList.add('hidden');
+  document.getElementById('dropScreen').classList.remove('hidden');
+  DATA = {}; sortedDates = []; dayStats = {};
+  if (chart) { chart.destroy(); chart = null; }
+  dropZone.classList.remove('loaded'); dropStatus.textContent = ''; fileInput.value = ''; goBtn.classList.remove('ready');
+});
+document.getElementById('datePicker').addEventListener('change', function() { updateChart(this.value); });
+document.getElementById('prevBtn').addEventListener('click', function() { const p = document.getElementById('datePicker'), i = sortedDates.indexOf(p.value); if (i > 0) { p.value = sortedDates[i-1]; updateChart(p.value); } });
+document.getElementById('nextBtn').addEventListener('click', function() { const p = document.getElementById('datePicker'), i = sortedDates.indexOf(p.value); if (i < sortedDates.length-1) { p.value = sortedDates[i+1]; updateChart(p.value); } });
+document.addEventListener('keydown', function(e) { if (document.getElementById('chartScreen').classList.contains('hidden')) return; if (e.key === 'ArrowLeft') document.getElementById('prevBtn').click(); if (e.key === 'ArrowRight') document.getElementById('nextBtn').click(); });
+</script>
+</body>
+</html>

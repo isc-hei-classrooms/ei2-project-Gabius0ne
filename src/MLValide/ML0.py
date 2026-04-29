@@ -62,10 +62,10 @@ from optuna.samplers import TPESampler
 # Chemins : le script est censé tourner depuis src/ML/, remonte 2 niveaux pour DATA/
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_features_v13.parquet"   # features v13
-Y_PATH = BASE / "processed" / "Y_target_v13.parquet"     # cible : load net normalisé (96 pas)
-B_PATH = BASE / "processed" / "B_baseline_v13.parquet"   # baseline Oiken pour comparaison
-OUT    = BASE / "models13v2"
+X_PATH = BASE / "processed" / "X_features_v13-1.parquet"   # features v13
+Y_PATH = BASE / "processed" / "Y_target_v13-1.parquet"     # cible : load net normalisé (96 pas)
+B_PATH = BASE / "processed" / "B_baseline_v13-1.parquet"   # baseline Oiken pour comparaison
+OUT    = BASE / "models13v3"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Split chronologique strict (pas de shuffle car données temporelles)
