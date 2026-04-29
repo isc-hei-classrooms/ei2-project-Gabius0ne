@@ -28,17 +28,17 @@ from optuna.samplers import TPESampler
 
 BASE = Path(__file__).resolve().parents[2] / "DATA"
 
-X_PATH = BASE / "processed" / "X_intraday_v3.parquet"
-Y_PATH = BASE / "processed" / "Y_intraday_v3.parquet"
-B_PATH = BASE / "processed" / "B_intraday_v3.parquet"
+X_PATH = BASE / "processed" / "X_intraday_GOLDEN.parquet"
+Y_PATH = BASE / "processed" / "Y_intraday_GOLDEN.parquet"
+B_PATH = BASE / "processed" / "B_intraday_GOLDEN.parquet"
 
 Y_DAYAHEAD_PATH = BASE / "processed" / "Y_target_v13.parquet"
 B_DAYAHEAD_PATH = BASE / "processed" / "B_baseline_v13.parquet"
 
-OUT = BASE / "models15_intraday"
+OUT = BASE / "modelsGOLDEN_intraday"
 OUT.mkdir(parents=True, exist_ok=True)
 
-TRAIN_RATIO = 0.47
+TRAIN_RATIO = 0.59
 VAL_RATIO   = 0.20
 
 N_OPTUNA_TRIALS  = 50

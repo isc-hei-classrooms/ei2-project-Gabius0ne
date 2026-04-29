@@ -45,8 +45,8 @@ from pathlib import Path
 from datetime import timedelta, date, datetime
 
 BASE  = Path(__file__).resolve().parents[2] / "DATA"
-CSV   = BASE / "oiken-data.csv"
-METEO = BASE / "meteo_multistation_v5.parquet"
+CSV   = BASE / "oiken-golden-dataset.csv"
+METEO = BASE / "meteo_multistationGOLDEN.parquet"
 OUT   = BASE / "processed"
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -591,9 +591,9 @@ def main():
     Y = pl.DataFrame(rows_Y).with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
     B = pl.DataFrame(rows_B).with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
 
-    X.write_parquet(OUT / "X_intraday_v3.parquet")
-    Y.write_parquet(OUT / "Y_intraday_v3.parquet")
-    B.write_parquet(OUT / "B_intraday_v3.parquet")
+    X.write_parquet(OUT / "X_intraday_GOLDEN.parquet")
+    Y.write_parquet(OUT / "Y_intraday_GOLDEN.parquet")
+    B.write_parquet(OUT / "B_intraday_GOLDEN.parquet")
 
     print(f"\n✓ X : {X.shape[0]:,} × {X.shape[1]}  |  Y : {Y.shape}  |  B : {B.shape}")
     print(f"  Features par sample : {len(fc)}")

@@ -13,11 +13,11 @@ import pandas as pd
 from pathlib import Path
 
 HERE      = Path(__file__).resolve().parent
-PRED_FILE = HERE / "predictions_testintra.parquet"
-BASE_FILE = HERE / "B_baseline_v13.parquet"
-REAL_FILE = HERE / "Y_target_v13.parquet"
-METEO_FILE = HERE / "meteo_multistation_v5.parquet"
-OUTPUT    = HERE / "Intraday.csv"
+PRED_FILE = HERE / "predictions_test_intraGOLDEN.parquet"
+BASE_FILE = HERE / "B_baseline_GOLDEN.parquet"
+REAL_FILE = HERE / "Y_target_GOLDEN.parquet"
+METEO_FILE = HERE / "meteo_multistationGOLDEN.parquet"
+OUTPUT    = HERE / "IntradayGOLDEN.csv"
 
 STATIONS = ['Sion', 'Visp', 'Montana']
 

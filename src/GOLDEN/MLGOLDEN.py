@@ -65,19 +65,19 @@ BASE = Path(__file__).resolve().parents[2] / "DATA"
 X_PATH = BASE / "processed" / "X_features_GOLDEN.parquet"   # features v13
 Y_PATH = BASE / "processed" / "Y_target_GOLDEN.parquet"     # cible : load net normalisé (96 pas)
 B_PATH = BASE / "processed" / "B_baseline_GOLDEN.parquet"   # baseline Oiken pour comparaison
-OUT    = BASE / "modelsGOLDEN"
+OUT    = BASE / "modelsGOLDEN1"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Split chronologique strict (pas de shuffle car données temporelles)
 TRAIN_RATIO = 0.59
-VAL_RATIO   = 0.20
+VAL_RATIO   = 0.15
 # Le test prend le reste (33%) = la période la plus récente
 
 # Hyperparamètres d'entraînement
 N_OPTUNA_TRIALS  = 90    # nombre de combinaisons testées par Optuna par groupe
 N_ESTIMATORS_MAX = 1000   # plafond de boosting rounds (early stopping coupe avant)
 EARLY_STOPPING   = 50     # arrêt si pas d'amélioration val sur 50 rounds consécutifs
-RANDOM_SEED      = 33     # reproductibilité du sampler Optuna
+RANDOM_SEED      = 346     # reproductibilité du sampler Optuna
 
 # Jours où la baseline Oiken a des valeurs aberrantes (trou de données dans leur système)
 # Exclus UNIQUEMENT des métriques finales, pas de l'entraînement
